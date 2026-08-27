@@ -94,6 +94,33 @@ def test_nanoring_rotamer_ensemble_can_keep_top_k_per_site() -> None:
         assert residue_scores == sorted(residue_scores)
 
 
+def test_nanoring_rotamer_ensemble_scores_secondary_structure_candidates() -> None:
+    placement = place_bp5_rotamer_ensembles_around_nanoring(
+        m=18,
+        cif_path=Path("data/rcsb/BP5.cif"),
+        max_rotamers_per_site=1,
+        secondary_structure="alpha_helix",
+        residues_before=1,
+        residues_after=1,
+    )
+
+    assert len(placement.accepted_rotamer_candidates) == 9
+    assert len(placement.secondary_structure_candidates) == 9
+    assert len(placement.accepted_secondary_structure_candidates) == 9
+    for candidate in placement.secondary_structure_candidates:
+        assert candidate.segment.residues_before == 1
+        assert candidate.segment.residues_after == 1
+        assert candidate.scaffold_clash_score >= 0.0
+        assert candidate.bp5_clash_score >= 0.0
+        assert candidate.neighboring_backbone_clash_score >= 0.0
+        assert np.isclose(
+            candidate.clash_score,
+            candidate.scaffold_clash_score
+            + candidate.bp5_clash_score
+            + candidate.neighboring_backbone_clash_score,
+        )
+
+
 def _coords_by_name(atom_array, atom_names: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
     return tuple(
         tuple(np.round(atom_array.coord[_atom_index(atom_array, atom_name)], 8))

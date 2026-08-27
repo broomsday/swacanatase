@@ -13,6 +13,7 @@ from swacanatase.secondary_structure import (
     N_CA_C_ANGLE_DEGREES,
     SECONDARY_STRUCTURE_TARGETS,
     build_regular_secondary_structure_segment,
+    score_secondary_structure_segment_clashes,
 )
 
 
@@ -107,6 +108,26 @@ def test_bp5_residue_frame_remains_fixed_after_segment_growth() -> None:
     assert "OXT" not in bp5_residue.atom_name.tolist()
     assert "HXT" not in bp5_residue.atom_name.tolist()
     assert "H2" not in bp5_residue.atom_name.tolist()
+
+
+def test_neighboring_secondary_structure_backbone_clashes_are_scored() -> None:
+    segment = build_regular_secondary_structure_segment(
+        _first_bp5_rotamer(),
+        secondary_structure_type="alpha_helix",
+        residues_before=1,
+        residues_after=1,
+    )
+
+    score = score_secondary_structure_segment_clashes(
+        segment,
+        neighboring_segments=(segment,),
+    )
+
+    assert score.scaffold_score == 0.0
+    assert score.bp5_score == 0.0
+    assert score.neighboring_backbone_score > 0.0
+    assert score.total_overlap_score == score.neighboring_backbone_score
+    assert not score.passes
 
 
 def _first_bp5_rotamer():

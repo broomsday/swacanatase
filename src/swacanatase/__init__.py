@@ -27,6 +27,7 @@ from .nanoring import generate_armchair_nanoring, write_armchair_nanoring
 from .placement import (
     BP5NanoringPlacement,
     BP5NanoringRotamerPlacement,
+    BP5SecondaryStructurePlacement,
     DEFAULT_M_VALUES,
     DEFAULT_NANORING_OUTPUT_DIR,
     DEFAULT_ROTAMER_OUTPUT_DIR,
@@ -44,13 +45,16 @@ from .placement import (
 from .secondary_structure import (
     SECONDARY_STRUCTURE_TARGETS,
     BackboneTorsionTargets,
+    SecondaryStructureClashScore,
     SecondaryStructureSegment,
     build_regular_secondary_structure_segment,
+    score_secondary_structure_segment_clashes,
 )
 
 __all__ = [
     "BP5NanoringPlacement",
     "BP5NanoringRotamerPlacement",
+    "BP5SecondaryStructurePlacement",
     "BP5_COMPONENT_ID",
     "BP5_DONOR_ATOMS",
     "BP5_INTER_RING_BOND",
@@ -67,6 +71,7 @@ __all__ = [
     "SECONDARY_STRUCTURE_TARGETS",
     "BackboneTorsionTargets",
     "SecondaryStructureSegment",
+    "SecondaryStructureClashScore",
     "SquarePlanarGeometry",
     "append_square_planar_palladium_site",
     "central_inter_benzene_linker_anchor_pairs",
@@ -87,6 +92,7 @@ __all__ = [
     "make_bp5_active_conformer",
     "place_bp5_rotamer_ensembles_around_nanoring",
     "place_bp5_sidechains_around_nanoring",
+    "score_secondary_structure_segment_clashes",
     "write_bp5_nanoring_series",
     "write_armchair_nanoring",
 ]

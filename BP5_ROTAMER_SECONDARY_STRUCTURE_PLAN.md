@@ -67,8 +67,8 @@ the residue backbone frame is rotated outward through allowed chi states.
 
 ## Torsion-Setting Mechanics
 
-Status: Complete for regular alpha-helix/beta-strand builders. Post-growth
-candidate scoring remains pending for a later integration pass.
+Status: Complete for regular alpha-helix/beta-strand builders and first-pass
+post-growth candidate clash scoring.
 
 Add a small, tested torsion utility rather than embedding torsion math directly
 inside placement code.
@@ -153,12 +153,12 @@ added as weights or ranking priors without changing the geometric machinery.
 
 ## Placement Integration
 
-Status: Partially complete. The opt-in nanoring rotamer ensemble workflow is in
-place, including rigid BP5/Pd placement reuse, per-site rotamer enumeration,
-realized chi measurement, scaffold clash scoring, neighboring active-site-core
-scoring, cutoff filtering, and top-`k` selection. Neighboring candidate-backbone
-clash scoring remains pending until secondary-structure/backbone candidates are
-introduced.
+Status: Complete for the first implementation pass. The opt-in nanoring rotamer
+ensemble workflow is in place, including rigid BP5/Pd placement reuse, per-site
+rotamer enumeration, realized chi measurement, scaffold clash scoring,
+neighboring active-site-core scoring, cutoff filtering, top-`k` selection,
+secondary-structure candidate generation, and post-growth neighboring
+candidate-backbone clash scoring.
 
 Extend the current workflow in `src/swacanatase/placement.py` without replacing
 the existing rigid BP5 placement behavior.
@@ -289,6 +289,8 @@ Secondary-structure tests:
   within deterministic tolerances.
 - [x] The BP5 residue frame remains aligned to the accepted rotamer after segment
   growth.
+- [x] Post-growth clash scoring reports scaffold, BP5-context, and neighboring
+  candidate-backbone components.
 
 ## CLI And Output Plan
 
@@ -305,6 +307,7 @@ Possible options:
 - `--secondary-structure {none,alpha_helix,beta_strand}`
 - `--residues-before N`
 - `--residues-after N`
+- `--secondary-structure-clash-cutoff VALUE`
 
 Suggested output directories:
 

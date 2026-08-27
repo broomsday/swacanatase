@@ -17,7 +17,9 @@ from .ligands import DEFAULT_LIGAND_DIR, load_bp5_bond_pairs
 from .nanoring import generate_armchair_nanoring
 from .secondary_structure import (
     SecondaryStructureType,
+    SecondaryStructureSegment,
     build_regular_secondary_structure_segment,
+    score_secondary_structure_segment_clashes,
 )
 
 DEFAULT_M_VALUES = (18, 24, 30, 36)
@@ -49,6 +51,7 @@ BP5_FIXED_ACTIVE_SITE_ATOMS = frozenset(
     }
 )
 BP5_VIRTUAL_CARBON_ATOMS = frozenset({"CV1", "CV2"})
+BP5_BACKBONE_ATOMS = frozenset({"N", "CA", "C", "O", "OXT"})
 
 
 @dataclass(frozen=True)
@@ -77,6 +80,18 @@ class BP5NanoringPlacement:
 
 
 @dataclass(frozen=True)
+class BP5SecondaryStructurePlacement:
+    """A grown protein segment candidate with post-growth clash components."""
+
+    rotamer_candidate: BP5RotamerPlacement
+    segment: SecondaryStructureSegment
+    scaffold_clash_score: float
+    bp5_clash_score: float
+    neighboring_backbone_clash_score: float
+    clash_score: float
+
+
+@dataclass(frozen=True)
 class BP5NanoringRotamerPlacement:
     """Rigid BP5/Pd placement plus per-site chi rotamer candidates."""
 
@@ -86,6 +101,10 @@ class BP5NanoringRotamerPlacement:
     anchor_pairs: tuple[NanoringAnchorPair, ...]
     rotamer_candidates: tuple[BP5RotamerPlacement, ...]
     accepted_rotamer_candidates: tuple[BP5RotamerPlacement, ...]
+    secondary_structure_candidates: tuple[BP5SecondaryStructurePlacement, ...] = ()
+    accepted_secondary_structure_candidates: tuple[
+        BP5SecondaryStructurePlacement, ...
+    ] = ()
 
 
 def generate_m_equals_n_nanoring(
@@ -292,10 +311,20 @@ def place_bp5_rotamer_ensembles_around_nanoring(
     snap_virtual_carbons: bool = False,
     max_rotamers_per_site: int | None = None,
     rotamer_clash_cutoff: float | None = None,
+    secondary_structure: SecondaryStructureType | None = None,
+    residues_before: int = 0,
+    residues_after: int = 0,
+    secondary_structure_clash_cutoff: float | None = None,
 ) -> BP5NanoringRotamerPlacement:
     """Place BP5/Pd sidechains and enumerate fixed-active-site chi rotamers."""
     if max_rotamers_per_site is not None and max_rotamers_per_site < 1:
         raise ValueError("max_rotamers_per_site must be at least 1")
+    if residues_before < 0 or residues_after < 0:
+        raise ValueError("residue counts must be non-negative")
+    if secondary_structure not in {None, "alpha_helix", "beta_strand"}:
+        raise ValueError(
+            "secondary_structure must be None, 'alpha_helix', or 'beta_strand'"
+        )
 
     rigid_placement = place_bp5_sidechains_around_nanoring(
         m=m,
@@ -348,6 +377,25 @@ def place_bp5_rotamer_ensembles_around_nanoring(
             residue_accepted = residue_accepted[:max_rotamers_per_site]
         accepted.extend(residue_accepted)
 
+    secondary_candidates: tuple[BP5SecondaryStructurePlacement, ...] = ()
+    accepted_secondary_candidates: tuple[BP5SecondaryStructurePlacement, ...] = ()
+    if secondary_structure is not None:
+        secondary_candidates = _build_secondary_structure_candidates(
+            rotamer_candidates=tuple(accepted),
+            nanoring=rigid_placement.nanoring,
+            rigid_sidechains=rigid_placement.sidechains,
+            secondary_structure=secondary_structure,
+            residues_before=residues_before,
+            residues_after=residues_after,
+            starting_atom_id=rigid_placement.nanoring.array_length() + 1,
+        )
+        accepted_secondary_candidates = tuple(
+            candidate
+            for candidate in secondary_candidates
+            if secondary_structure_clash_cutoff is None
+            or candidate.clash_score <= secondary_structure_clash_cutoff
+        )
+
     return BP5NanoringRotamerPlacement(
         m=m,
         nanoring=rigid_placement.nanoring,
@@ -355,6 +403,8 @@ def place_bp5_rotamer_ensembles_around_nanoring(
         anchor_pairs=rigid_placement.anchor_pairs,
         rotamer_candidates=tuple(candidates),
         accepted_rotamer_candidates=tuple(accepted),
+        secondary_structure_candidates=secondary_candidates,
+        accepted_secondary_structure_candidates=accepted_secondary_candidates,
     )
 
 
@@ -372,6 +422,7 @@ def write_bp5_nanoring_series(
     secondary_structure: SecondaryStructureType | None = None,
     residues_before: int = 0,
     residues_after: int = 0,
+    secondary_structure_clash_cutoff: float | None = None,
 ) -> list[Path]:
     """Write nanoring-only and BP5-placed structures for each requested M value."""
     if max_rotamers_per_site is not None and max_rotamers_per_site < 1:
@@ -432,6 +483,10 @@ def write_bp5_nanoring_series(
             snap_virtual_carbons=snap_virtual_carbons,
             max_rotamers_per_site=max_rotamers_per_site,
             rotamer_clash_cutoff=rotamer_clash_cutoff,
+            secondary_structure=secondary_structure,
+            residues_before=residues_before,
+            residues_after=residues_after,
+            secondary_structure_clash_cutoff=secondary_structure_clash_cutoff,
         )
         for candidate in rotamer_placement.accepted_rotamer_candidates:
             if enumerate_bp5_rotamers:
@@ -452,33 +507,103 @@ def write_bp5_nanoring_series(
                         overwrite=overwrite,
                     )
                 )
-            if secondary_structure is not None:
-                segment = build_regular_secondary_structure_segment(
-                    bp5_rotamer=candidate,
-                    secondary_structure_type=secondary_structure,
-                    residues_before=residues_before,
-                    residues_after=residues_after,
-                    starting_atom_id=rotamer_placement.nanoring.array_length() + 1,
+
+        for candidate in rotamer_placement.accepted_secondary_structure_candidates:
+            segment_path = (
+                secondary_structure_output_dir
+                / (
+                    f"nanoring_M{m}_site{candidate.rotamer_candidate.residue_id:02d}_"
+                    f"{candidate.rotamer_candidate.rotamer.name}_{secondary_structure}_"
+                    f"pre{residues_before}_post{residues_after}.{file_format}"
                 )
-                segment_path = (
-                    secondary_structure_output_dir
-                    / (
-                        f"nanoring_M{m}_site{candidate.residue_id:02d}_"
-                        f"{candidate.rotamer.name}_{secondary_structure}_"
-                        f"pre{residues_before}_post{residues_after}.{file_format}"
-                    )
+            )
+            written_paths.append(
+                write_structure(
+                    atom_array=struc.concatenate(
+                        [rotamer_placement.nanoring, candidate.segment.atom_array]
+                    ),
+                    output_path=segment_path,
+                    file_format=file_format,
+                    overwrite=overwrite,
                 )
-                written_paths.append(
-                    write_structure(
-                        atom_array=struc.concatenate(
-                            [rotamer_placement.nanoring, segment.atom_array]
-                        ),
-                        output_path=segment_path,
-                        file_format=file_format,
-                        overwrite=overwrite,
-                    )
-                )
+            )
     return written_paths
+
+
+def _build_secondary_structure_candidates(
+    rotamer_candidates: tuple[BP5RotamerPlacement, ...],
+    nanoring: struc.AtomArray,
+    rigid_sidechains: struc.AtomArray,
+    secondary_structure: SecondaryStructureType,
+    residues_before: int,
+    residues_after: int,
+    starting_atom_id: int,
+) -> tuple[BP5SecondaryStructurePlacement, ...]:
+    segment_pairs = tuple(
+        (
+            candidate,
+            build_regular_secondary_structure_segment(
+                bp5_rotamer=candidate,
+                secondary_structure_type=secondary_structure,
+                residues_before=residues_before,
+                residues_after=residues_after,
+                starting_atom_id=starting_atom_id,
+            ),
+        )
+        for candidate in rotamer_candidates
+    )
+
+    scored_candidates: list[BP5SecondaryStructurePlacement] = []
+    for candidate, segment in segment_pairs:
+        neighboring_segments = tuple(
+            neighboring_segment
+            for neighboring_candidate, neighboring_segment in segment_pairs
+            if neighboring_candidate.residue_id != candidate.residue_id
+        )
+        bp5_context = _bp5_context_for_secondary_structure_candidate(
+            candidate=candidate,
+            rigid_sidechains=rigid_sidechains,
+        )
+        score = score_secondary_structure_segment_clashes(
+            segment=segment,
+            nanoring=nanoring,
+            bp5_context=bp5_context,
+            neighboring_segments=neighboring_segments,
+        )
+        scored_candidates.append(
+            BP5SecondaryStructurePlacement(
+                rotamer_candidate=candidate,
+                segment=segment,
+                scaffold_clash_score=score.scaffold_score,
+                bp5_clash_score=score.bp5_score,
+                neighboring_backbone_clash_score=score.neighboring_backbone_score,
+                clash_score=score.total_overlap_score,
+            )
+        )
+    return tuple(
+        sorted(
+            scored_candidates,
+            key=lambda candidate: (
+                candidate.rotamer_candidate.residue_id,
+                candidate.clash_score,
+                candidate.rotamer_candidate.rotamer.name,
+            ),
+        )
+    )
+
+
+def _bp5_context_for_secondary_structure_candidate(
+    candidate: BP5RotamerPlacement,
+    rigid_sidechains: struc.AtomArray,
+) -> struc.AtomArray:
+    own_bp5_non_backbone = _without_atom_names(candidate.atom_array, BP5_BACKBONE_ATOMS)
+    neighboring_active_site_cores = _only_atom_names(
+        rigid_sidechains[rigid_sidechains.res_id != candidate.residue_id],
+        BP5_FIXED_ACTIVE_SITE_ATOMS,
+    )
+    if neighboring_active_site_cores.array_length() == 0:
+        return own_bp5_non_backbone
+    return struc.concatenate([own_bp5_non_backbone, neighboring_active_site_cores])
 
 
 def _score_bp5_rotamer_candidate(
@@ -722,6 +847,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Reject rotamer candidates with clash scores above this value.",
     )
     parser.add_argument(
+        "--secondary-structure-clash-cutoff",
+        type=float,
+        default=None,
+        help=(
+            "Reject grown secondary-structure candidates with clash scores above "
+            "this value."
+        ),
+    )
+    parser.add_argument(
         "--secondary-structure",
         choices=["none", "alpha_helix", "beta_strand"],
         default="none",
@@ -771,6 +905,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         residues_before=args.residues_before,
         residues_after=args.residues_after,
+        secondary_structure_clash_cutoff=args.secondary_structure_clash_cutoff,
     )
     for path in written_paths:
         print(f"Wrote {path}")

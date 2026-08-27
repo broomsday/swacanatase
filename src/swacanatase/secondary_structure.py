@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -7,6 +8,7 @@ import biotite.structure as struc
 import numpy as np
 
 from .bp5_rotamers import BP5RotamerPlacement
+from .clashes import score_heavy_atom_clashes
 
 SecondaryStructureType = Literal["alpha_helix", "beta_strand"]
 
@@ -39,6 +41,23 @@ class SecondaryStructureSegment:
     residues_before: int
     residues_after: int
     torsion_targets: BackboneTorsionTargets
+
+
+@dataclass(frozen=True)
+class SecondaryStructureClashScore:
+    scaffold_score: float
+    bp5_score: float
+    neighboring_backbone_score: float
+
+    @property
+    def total_overlap_score(self) -> float:
+        return float(
+            self.scaffold_score + self.bp5_score + self.neighboring_backbone_score
+        )
+
+    @property
+    def passes(self) -> bool:
+        return self.total_overlap_score == 0.0
 
 
 SECONDARY_STRUCTURE_TARGETS: dict[SecondaryStructureType, BackboneTorsionTargets] = {
@@ -127,6 +146,44 @@ def build_regular_secondary_structure_segment(
     )
 
 
+def score_secondary_structure_segment_clashes(
+    segment: SecondaryStructureSegment,
+    nanoring: struc.AtomArray | None = None,
+    bp5_context: struc.AtomArray | None = None,
+    neighboring_segments: Iterable[SecondaryStructureSegment] = (),
+) -> SecondaryStructureClashScore:
+    """Score post-growth backbone clashes against scaffold, BP5, and neighbors."""
+    backbone = _backbone_atoms(segment.atom_array)
+    generated_backbone = _generated_backbone_atoms(segment)
+    scaffold_score = (
+        score_heavy_atom_clashes(backbone, other=nanoring).total_overlap_score
+        if nanoring is not None
+        else 0.0
+    )
+    bp5_score = (
+        score_heavy_atom_clashes(
+            generated_backbone,
+            other=bp5_context,
+        ).total_overlap_score
+        if bp5_context is not None
+        else 0.0
+    )
+    neighboring_backbone_score = float(
+        sum(
+            score_heavy_atom_clashes(
+                backbone,
+                other=_backbone_atoms(neighboring_segment.atom_array),
+            ).total_overlap_score
+            for neighboring_segment in neighboring_segments
+        )
+    )
+    return SecondaryStructureClashScore(
+        scaffold_score=float(scaffold_score),
+        bp5_score=float(bp5_score),
+        neighboring_backbone_score=neighboring_backbone_score,
+    )
+
+
 def _grow_backbone_coordinates(
     bp5: struc.AtomArray,
     residues_before: int,
@@ -135,7 +192,8 @@ def _grow_backbone_coordinates(
 ) -> dict[int, dict[str, np.ndarray]]:
     bp5_residue_id = residues_before + 1
     bp5_coords = {
-        atom_name: _atom_coord(bp5, atom_name).copy() for atom_name in BACKBONE_ATOM_NAMES
+        atom_name: _atom_coord(bp5, atom_name).copy()
+        for atom_name in BACKBONE_ATOM_NAMES
     }
     coordinates: dict[int, dict[str, np.ndarray]] = {bp5_residue_id: bp5_coords}
 
@@ -297,6 +355,18 @@ def _prepare_bp5_residue(
         ),
     )
     return prepared
+
+
+def _backbone_atoms(atom_array: struc.AtomArray) -> struc.AtomArray:
+    return atom_array[np.isin(atom_array.atom_name, list(BACKBONE_ATOM_NAMES))]
+
+
+def _generated_backbone_atoms(segment: SecondaryStructureSegment) -> struc.AtomArray:
+    atom_array = segment.atom_array
+    return atom_array[
+        (atom_array.res_id != segment.bp5_residue_id)
+        & np.isin(atom_array.atom_name, list(BACKBONE_ATOM_NAMES))
+    ]
 
 
 def _require_atom_names(atom_array: struc.AtomArray, atom_names: tuple[str, ...]) -> None:
