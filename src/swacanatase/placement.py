@@ -15,6 +15,9 @@ from .ligands import DEFAULT_LIGAND_DIR
 from .nanoring import generate_armchair_nanoring
 
 DEFAULT_M_VALUES = (18, 24, 30, 36)
+DEFAULT_GENERATED_DATA_DIR = Path("data/generated")
+DEFAULT_NANORING_OUTPUT_DIR = DEFAULT_GENERATED_DATA_DIR / "nanoring"
+DEFAULT_THEOZYME_OUTPUT_DIR = DEFAULT_GENERATED_DATA_DIR / "theozyme"
 RING_AXIS = np.array([0.0, 0.0, 1.0], dtype=float)
 
 
@@ -237,7 +240,7 @@ def place_bp5_sidechains_around_nanoring(
 
 
 def write_bp5_nanoring_series(
-    output_dir: str | Path,
+    output_dir: str | Path = DEFAULT_GENERATED_DATA_DIR,
     m_values: Iterable[int] = DEFAULT_M_VALUES,
     units: float | int = 1.5,
     anchor_phase_offset: int = 1,
@@ -247,7 +250,10 @@ def write_bp5_nanoring_series(
 ) -> list[Path]:
     """Write nanoring-only and BP5-placed structures for each requested M value."""
     output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    nanoring_output_dir = output_dir / "nanoring"
+    theozyme_output_dir = output_dir / "theozyme"
+    nanoring_output_dir.mkdir(parents=True, exist_ok=True)
+    theozyme_output_dir.mkdir(parents=True, exist_ok=True)
 
     written_paths: list[Path] = []
     for m in m_values:
@@ -257,8 +263,8 @@ def write_bp5_nanoring_series(
             anchor_phase_offset=anchor_phase_offset,
             snap_virtual_carbons=snap_virtual_carbons,
         )
-        ring_path = output_dir / f"nanoring_M{m}.{file_format}"
-        complex_path = output_dir / f"nanoring_M{m}_bp5.{file_format}"
+        ring_path = nanoring_output_dir / f"nanoring_M{m}.{file_format}"
+        complex_path = theozyme_output_dir / f"nanoring_M{m}_bp5.{file_format}"
         written_paths.append(
             write_structure(
                 atom_array=placement.nanoring,
@@ -466,7 +472,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Overwrite CV1/CV2 coordinates onto the matched nanoring carbons.",
     )
     parser.add_argument("--format", choices=["pdb", "cif"], default="cif")
-    parser.add_argument("--output-dir", type=Path, default=Path("data/generated"))
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_GENERATED_DATA_DIR,
+        help=(
+            "Generated-data root. Nanoring-only files are written under "
+            "nanoring/ and BP5 complexes under theozyme/."
+        ),
+    )
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args(argv)
 

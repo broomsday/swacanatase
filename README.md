@@ -47,7 +47,7 @@ print(bp5.coord.shape)
 Generate an armchair `(n,n)` carbon scaffold using `tuber`:
 
 ```bash
-uv run swacanatase-generate-armchair --n 6 --units 1 --output data/generated/armchair_6_6.cif
+uv run swacanatase-generate-armchair --n 6 --units 1 --output data/generated/nanoring/armchair_6_6.cif
 ```
 
 Or from Python:
@@ -67,8 +67,9 @@ linker carbon pairs:
 uv run swacanatase-generate-bp5-nanorings --m 18 24 30 36 --output-dir data/generated --overwrite
 ```
 
-The command writes `nanoring_M*.cif` scaffold files and `nanoring_M*_bp5.cif`
-complex files containing the placed BP5 active-site model. By default, `CV1`
+The command writes `data/generated/nanoring/nanoring_M*.cif` scaffold files and
+`data/generated/theozyme/nanoring_M*_bp5.cif` complex files containing the placed
+BP5 active-site model. By default, `CV1`
 and `CV2` keep the ideal catalytic geometry and are rigid-fit to minimize RMSD
 against the adjacent carbons corresponding to position 4 of one pseudo-benzene
 and position 1 of the next. Use `--snap-virtual-carbons` only when exact

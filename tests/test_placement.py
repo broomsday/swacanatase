@@ -13,6 +13,7 @@ from swacanatase.placement import (
     generate_m_equals_n_nanoring,
     generate_m_equals_n_nanorings,
     place_bp5_sidechains_around_nanoring,
+    write_bp5_nanoring_series,
 )
 
 
@@ -136,6 +137,22 @@ def test_bp5_complex_uses_bp5_chain_a_and_nanoring_chain_b() -> None:
 
     assert set(bp5_atoms.chain_id) == {"A"}
     assert set(nanoring_atoms.chain_id) == {"B"}
+
+
+def test_write_bp5_nanoring_series_separates_nanoring_and_theozyme_outputs(
+    tmp_path: Path,
+) -> None:
+    written_paths = write_bp5_nanoring_series(
+        output_dir=tmp_path,
+        m_values=(18,),
+        overwrite=True,
+    )
+
+    assert written_paths == [
+        tmp_path / "nanoring" / "nanoring_M18.cif",
+        tmp_path / "theozyme" / "nanoring_M18_bp5.cif",
+    ]
+    assert all(path.exists() for path in written_paths)
 
 
 def _atom_coord(atom_array, atom_name: str) -> np.ndarray:
