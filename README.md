@@ -69,8 +69,10 @@ uv run swacanatase-generate-bp5-nanorings --m 18 24 30 36 --output-dir data/gene
 
 The command writes `nanoring_M*.cif` scaffold files and `nanoring_M*_bp5.cif`
 complex files containing the placed BP5 active-site model. By default, `CV1`
-and `CV2` are placed on the adjacent carbons corresponding to position 4 of one
-pseudo-benzene and position 1 of the next.
+and `CV2` keep the ideal catalytic geometry and are rigid-fit to minimize RMSD
+against the adjacent carbons corresponding to position 4 of one pseudo-benzene
+and position 1 of the next. Use `--snap-virtual-carbons` only when exact
+virtual-carbon overlap is desired.
 
 ## Data Backup
 

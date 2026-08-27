@@ -195,7 +195,7 @@ def place_bp5_sidechains_around_nanoring(
     z_band: str = "lower",
     anchor_phase_offset: int = 1,
     sidechain_direction: str = "outward",
-    snap_virtual_carbons: bool = True,
+    snap_virtual_carbons: bool = False,
 ) -> BP5NanoringPlacement:
     """Generate an M=N nanoring and place ``m/2`` BP5 sidechains around it."""
     if m % 2 != 0:
@@ -241,6 +241,7 @@ def write_bp5_nanoring_series(
     m_values: Iterable[int] = DEFAULT_M_VALUES,
     units: float | int = 1.5,
     anchor_phase_offset: int = 1,
+    snap_virtual_carbons: bool = False,
     file_format: str = "cif",
     overwrite: bool = False,
 ) -> list[Path]:
@@ -254,6 +255,7 @@ def write_bp5_nanoring_series(
             m=m,
             units=units,
             anchor_phase_offset=anchor_phase_offset,
+            snap_virtual_carbons=snap_virtual_carbons,
         )
         ring_path = output_dir / f"nanoring_M{m}.{file_format}"
         complex_path = output_dir / f"nanoring_M{m}_bp5.{file_format}"
@@ -458,6 +460,11 @@ def main(argv: list[str] | None = None) -> int:
         default=1,
         help="Phase offset into the evenly spaced central-band anchor pairs.",
     )
+    parser.add_argument(
+        "--snap-virtual-carbons",
+        action="store_true",
+        help="Overwrite CV1/CV2 coordinates onto the matched nanoring carbons.",
+    )
     parser.add_argument("--format", choices=["pdb", "cif"], default="cif")
     parser.add_argument("--output-dir", type=Path, default=Path("data/generated"))
     parser.add_argument("--overwrite", action="store_true")
@@ -468,6 +475,7 @@ def main(argv: list[str] | None = None) -> int:
         m_values=args.m,
         units=args.units,
         anchor_phase_offset=args.anchor_phase_offset,
+        snap_virtual_carbons=args.snap_virtual_carbons,
         file_format=args.format,
         overwrite=args.overwrite,
     )

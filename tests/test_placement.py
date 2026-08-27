@@ -2,6 +2,10 @@ from pathlib import Path
 
 import numpy as np
 
+from swacanatase.active_site import (
+    DEFAULT_PD_C_BOND_LENGTH,
+    build_bp5_palladium_active_site,
+)
 from swacanatase.placement import (
     DEFAULT_M_VALUES,
     central_inter_benzene_linker_anchor_pairs,
@@ -63,10 +67,14 @@ def test_central_inter_benzene_anchor_pairs_select_even_m_over_2_sites() -> None
         )
 
 
-def test_bp5_virtual_carbons_snap_to_selected_anchor_carbons() -> None:
+def test_bp5_virtual_carbons_keep_ideal_geometry_after_best_anchor_fit() -> None:
     placement = place_bp5_sidechains_around_nanoring(
         m=18,
         cif_path=Path("data/rcsb/BP5.cif"),
+    )
+    source = build_bp5_palladium_active_site(Path("data/rcsb/BP5.cif"))
+    source_cv_distance = np.linalg.norm(
+        _atom_coord(source, "CV2") - _atom_coord(source, "CV1")
     )
 
     assert placement.nanoring.array_length() == 108
@@ -75,13 +83,46 @@ def test_bp5_virtual_carbons_snap_to_selected_anchor_carbons() -> None:
 
     for residue_id, anchor in enumerate(placement.anchor_pairs, start=1):
         residue = placement.sidechains[placement.sidechains.res_id == residue_id]
-        cv1 = residue.coord[residue.atom_name.tolist().index("CV1")]
-        cv2 = residue.coord[residue.atom_name.tolist().index("CV2")]
-        pd = residue.coord[residue.atom_name.tolist().index("PD")]
+        cv1 = _atom_coord(residue, "CV1")
+        cv2 = _atom_coord(residue, "CV2")
+        pd = _atom_coord(residue, "PD")
+        cv_midpoint = (cv1 + cv2) / 2.0
+        expected_residual = (source_cv_distance - anchor.anchor_distance) / 2.0
 
-        assert np.allclose(cv1, anchor.coordinates[0])
-        assert np.allclose(cv2, anchor.coordinates[1])
+        assert np.allclose(cv_midpoint, anchor.midpoint, atol=1e-6)
+        assert np.allclose(np.linalg.norm(cv2 - cv1), source_cv_distance, atol=1e-6)
+        assert np.allclose(
+            _unit(cv2 - cv1),
+            _unit(anchor.coordinates[1] - anchor.coordinates[0]),
+            atol=1e-6,
+        )
+        assert np.isclose(
+            np.linalg.norm(cv1 - anchor.coordinates[0]),
+            expected_residual,
+            atol=1e-6,
+        )
+        assert np.isclose(
+            np.linalg.norm(cv2 - anchor.coordinates[1]),
+            expected_residual,
+            atol=1e-6,
+        )
+        assert np.isclose(np.linalg.norm(cv1 - pd), DEFAULT_PD_C_BOND_LENGTH, atol=1e-6)
+        assert np.isclose(np.linalg.norm(cv2 - pd), DEFAULT_PD_C_BOND_LENGTH, atol=1e-6)
         assert np.dot(pd - anchor.midpoint, anchor.radial_direction) > 0
+
+
+def test_bp5_virtual_carbons_can_still_snap_to_selected_anchor_carbons() -> None:
+    placement = place_bp5_sidechains_around_nanoring(
+        m=18,
+        cif_path=Path("data/rcsb/BP5.cif"),
+        snap_virtual_carbons=True,
+    )
+
+    for residue_id, anchor in enumerate(placement.anchor_pairs, start=1):
+        residue = placement.sidechains[placement.sidechains.res_id == residue_id]
+
+        assert np.allclose(_atom_coord(residue, "CV1"), anchor.coordinates[0])
+        assert np.allclose(_atom_coord(residue, "CV2"), anchor.coordinates[1])
 
 
 def test_bp5_complex_uses_bp5_chain_a_and_nanoring_chain_b() -> None:
@@ -95,3 +136,11 @@ def test_bp5_complex_uses_bp5_chain_a_and_nanoring_chain_b() -> None:
 
     assert set(bp5_atoms.chain_id) == {"A"}
     assert set(nanoring_atoms.chain_id) == {"B"}
+
+
+def _atom_coord(atom_array, atom_name: str) -> np.ndarray:
+    return atom_array.coord[atom_array.atom_name.tolist().index(atom_name)]
+
+
+def _unit(vector: np.ndarray) -> np.ndarray:
+    return vector / np.linalg.norm(vector)
