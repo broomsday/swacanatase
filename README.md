@@ -59,6 +59,19 @@ ring = generate_armchair_nanoring(n=6, units=1)
 print(ring.array_length())
 ```
 
+Generate the current M=N nanoring series with 1.5 armchair units, giving `6M`
+carbon atoms, and place `M/2` BP5 sidechains around the central inter-benzene
+linker carbon pairs:
+
+```bash
+uv run swacanatase-generate-bp5-nanorings --m 18 24 30 36 --output-dir data/generated --overwrite
+```
+
+The command writes `nanoring_M*.cif` scaffold files and `nanoring_M*_bp5.cif`
+complex files containing the placed BP5 active-site model. By default, `CV1`
+and `CV2` are placed on the adjacent carbons corresponding to position 4 of one
+pseudo-benzene and position 1 of the next.
+
 ## Data Backup
 
 Local data under `data/` is intentionally not tracked by git. Use S3 sync for

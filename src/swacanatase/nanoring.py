@@ -11,7 +11,7 @@ from tuber.writers import write_structure
 
 def generate_armchair_nanoring(
     n: int,
-    units: int = 1,
+    units: float | int = 1,
     hydrogen_terminate: bool = False,
     center_z: bool = True,
 ) -> struc.AtomArray:
@@ -29,7 +29,7 @@ def generate_armchair_nanoring(
 def write_armchair_nanoring(
     n: int,
     output_path: str | Path,
-    units: int = 1,
+    units: float | int = 1,
     file_format: str | None = None,
     hydrogen_terminate: bool = False,
     overwrite: bool = False,
@@ -50,12 +50,20 @@ def write_armchair_nanoring(
     )
 
 
+def _units_argument(raw: str) -> float | int:
+    try:
+        value = float(raw)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid units value: {raw!r}")
+    return int(value) if value.is_integer() else value
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Generate an armchair (n,n) nanohoop scaffold with tuber."
     )
     parser.add_argument("--n", type=int, required=True, help="Armchair index n for (n,n).")
-    parser.add_argument("--units", type=int, default=1)
+    parser.add_argument("--units", type=_units_argument, default=1)
     parser.add_argument("--format", choices=["pdb", "cif"], default=None)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--hydrogen-terminate", action="store_true")

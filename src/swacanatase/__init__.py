@@ -24,28 +24,48 @@ from .active_site import (
     make_bp5_active_conformer,
 )
 from .nanoring import generate_armchair_nanoring, write_armchair_nanoring
+from .placement import (
+    BP5NanoringPlacement,
+    DEFAULT_M_VALUES,
+    NanoringAnchorPair,
+    central_inter_benzene_linker_anchor_pairs,
+    central_para_linker_anchor_pairs,
+    generate_m_equals_n_nanoring,
+    generate_m_equals_n_nanorings,
+    place_bp5_sidechains_around_nanoring,
+    write_bp5_nanoring_series,
+)
 
 __all__ = [
+    "BP5NanoringPlacement",
     "BP5_COMPONENT_ID",
     "BP5_DONOR_ATOMS",
     "BP5_INTER_RING_BOND",
     "DEFAULT_LIGAND_DIR",
+    "DEFAULT_M_VALUES",
     "DEFAULT_PD_C_BOND_LENGTH",
     "DEFAULT_PD_N_BOND_LENGTH",
+    "NanoringAnchorPair",
     "RCSBLigandPaths",
     "SquarePlanarGeometry",
     "append_square_planar_palladium_site",
+    "central_inter_benzene_linker_anchor_pairs",
+    "central_para_linker_anchor_pairs",
     "build_bp5_palladium_active_site",
     "describe_square_planar_geometry",
     "download_bp5",
     "download_rcsb_ligand",
     "generate_armchair_nanoring",
+    "generate_m_equals_n_nanoring",
+    "generate_m_equals_n_nanorings",
     "load_active_bp5_atom_array",
     "load_bp5_atom_array",
     "load_bp5_bond_pairs",
     "load_chemical_component_atom_array",
     "load_chemical_component_bond_pairs",
     "make_bp5_active_conformer",
+    "place_bp5_sidechains_around_nanoring",
+    "write_bp5_nanoring_series",
     "write_armchair_nanoring",
 ]
 

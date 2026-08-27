@@ -20,6 +20,7 @@ dev = ["pytest>=8.0"]
 [project.scripts]
 swacanatase-download-bp5 = "swacanatase.ligands:main"
 swacanatase-generate-armchair = "swacanatase.nanoring:main"
+swacanatase-generate-bp5-nanorings = "swacanatase.placement:main"
 
 [tool.uv.sources]
 tuber = { path = "../tuber", editable = true }
