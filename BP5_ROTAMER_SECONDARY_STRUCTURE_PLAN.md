@@ -67,7 +67,8 @@ the residue backbone frame is rotated outward through allowed chi states.
 
 ## Torsion-Setting Mechanics
 
-Status: Complete for the first implementation pass.
+Status: Complete for regular alpha-helix/beta-strand builders. Post-growth
+candidate scoring remains pending for a later integration pass.
 
 Add a small, tested torsion utility rather than embedding torsion math directly
 inside placement code.
@@ -212,7 +213,7 @@ Initial output fields:
 
 ## Secondary-Structure Growth
 
-Status: Pending.
+Status: Complete for the first implementation pass.
 
 Only after BP5 rotamer candidates are generated and filtered should regular
 secondary structure be attached.
@@ -283,10 +284,10 @@ Placement tests:
 
 Secondary-structure tests:
 
-- [ ] Alpha-helix and beta-strand builders produce the requested residue counts.
-- [ ] Generated peptide bond lengths, backbone angles, and `phi`/`psi` values are
+- [x] Alpha-helix and beta-strand builders produce the requested residue counts.
+- [x] Generated peptide bond lengths, backbone angles, and `phi`/`psi` values are
   within deterministic tolerances.
-- [ ] The BP5 residue frame remains aligned to the accepted rotamer after segment
+- [x] The BP5 residue frame remains aligned to the accepted rotamer after segment
   growth.
 
 ## CLI And Output Plan
@@ -324,7 +325,7 @@ Generated complexes should preserve the existing chain convention:
 4. [x] Add active-site preservation and chi-realization tests.
 5. [x] Add heavy-atom clash scoring.
 6. [x] Integrate rotamer enumeration into nanoring placement as an opt-in workflow.
-7. [ ] Add regular alpha-helix and beta-strand builders from accepted BP5 residue
+7. [x] Add regular alpha-helix and beta-strand builders from accepted BP5 residue
    frames.
 8. [ ] Add CLI options and generated-output paths.
 

@@ -35,6 +35,12 @@ from .placement import (
     place_bp5_sidechains_around_nanoring,
     write_bp5_nanoring_series,
 )
+from .secondary_structure import (
+    SECONDARY_STRUCTURE_TARGETS,
+    BackboneTorsionTargets,
+    SecondaryStructureSegment,
+    build_regular_secondary_structure_segment,
+)
 
 __all__ = [
     "BP5NanoringPlacement",
@@ -47,11 +53,15 @@ __all__ = [
     "DEFAULT_PD_N_BOND_LENGTH",
     "NanoringAnchorPair",
     "RCSBLigandPaths",
+    "SECONDARY_STRUCTURE_TARGETS",
+    "BackboneTorsionTargets",
+    "SecondaryStructureSegment",
     "SquarePlanarGeometry",
     "append_square_planar_palladium_site",
     "central_inter_benzene_linker_anchor_pairs",
     "central_para_linker_anchor_pairs",
     "build_bp5_palladium_active_site",
+    "build_regular_secondary_structure_segment",
     "describe_square_planar_geometry",
     "download_bp5",
     "download_rcsb_ligand",
