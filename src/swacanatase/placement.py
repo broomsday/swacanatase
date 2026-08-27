@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable
 
@@ -11,7 +11,9 @@ import numpy as np
 from tuber.writers import write_structure
 
 from .active_site import build_bp5_palladium_active_site
-from .ligands import DEFAULT_LIGAND_DIR
+from .bp5_rotamers import BP5RotamerPlacement, enumerate_bp5_chi_rotamers
+from .clashes import score_heavy_atom_clashes
+from .ligands import DEFAULT_LIGAND_DIR, load_bp5_bond_pairs
 from .nanoring import generate_armchair_nanoring
 
 DEFAULT_M_VALUES = (18, 24, 30, 36)
@@ -19,6 +21,26 @@ DEFAULT_GENERATED_DATA_DIR = Path("data/generated")
 DEFAULT_NANORING_OUTPUT_DIR = DEFAULT_GENERATED_DATA_DIR / "nanoring"
 DEFAULT_THEOZYME_OUTPUT_DIR = DEFAULT_GENERATED_DATA_DIR / "theozyme"
 RING_AXIS = np.array([0.0, 0.0, 1.0], dtype=float)
+BP5_FIXED_ACTIVE_SITE_ATOMS = frozenset(
+    {
+        "N1",
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "N2",
+        "C6",
+        "C7",
+        "C8",
+        "C9",
+        "C11",
+        "PD",
+        "CV1",
+        "CV2",
+    }
+)
+BP5_VIRTUAL_CARBON_ATOMS = frozenset({"CV1", "CV2"})
 
 
 @dataclass(frozen=True)
@@ -44,6 +66,18 @@ class BP5NanoringPlacement:
     sidechains: struc.AtomArray
     complex: struc.AtomArray
     anchor_pairs: tuple[NanoringAnchorPair, ...]
+
+
+@dataclass(frozen=True)
+class BP5NanoringRotamerPlacement:
+    """Rigid BP5/Pd placement plus per-site chi rotamer candidates."""
+
+    m: int
+    nanoring: struc.AtomArray
+    rigid_sidechains: struc.AtomArray
+    anchor_pairs: tuple[NanoringAnchorPair, ...]
+    rotamer_candidates: tuple[BP5RotamerPlacement, ...]
+    accepted_rotamer_candidates: tuple[BP5RotamerPlacement, ...]
 
 
 def generate_m_equals_n_nanoring(
@@ -239,6 +273,83 @@ def place_bp5_sidechains_around_nanoring(
     )
 
 
+def place_bp5_rotamer_ensembles_around_nanoring(
+    m: int,
+    units: float | int = 1.5,
+    cif_path: str | Path = DEFAULT_LIGAND_DIR / "BP5.cif",
+    coordinate_set: str = "ideal",
+    z_band: str = "lower",
+    anchor_phase_offset: int = 1,
+    sidechain_direction: str = "outward",
+    snap_virtual_carbons: bool = False,
+    max_rotamers_per_site: int | None = None,
+    rotamer_clash_cutoff: float | None = None,
+) -> BP5NanoringRotamerPlacement:
+    """Place BP5/Pd sidechains and enumerate fixed-active-site chi rotamers."""
+    if max_rotamers_per_site is not None and max_rotamers_per_site < 1:
+        raise ValueError("max_rotamers_per_site must be at least 1")
+
+    rigid_placement = place_bp5_sidechains_around_nanoring(
+        m=m,
+        units=units,
+        cif_path=cif_path,
+        coordinate_set=coordinate_set,
+        z_band=z_band,
+        anchor_phase_offset=anchor_phase_offset,
+        sidechain_direction=sidechain_direction,
+        snap_virtual_carbons=snap_virtual_carbons,
+    )
+    bond_pairs = load_bp5_bond_pairs(cif_path=cif_path)
+
+    candidates: list[BP5RotamerPlacement] = []
+    accepted: list[BP5RotamerPlacement] = []
+    for residue_id in range(1, len(rigid_placement.anchor_pairs) + 1):
+        residue = rigid_placement.sidechains[
+            rigid_placement.sidechains.res_id == residue_id
+        ]
+        residue_candidates = tuple(
+            replace(
+                candidate,
+                clash_score=_score_bp5_rotamer_candidate(
+                    candidate.atom_array,
+                    nanoring=rigid_placement.nanoring,
+                    neighboring_sidechains=rigid_placement.sidechains[
+                        rigid_placement.sidechains.res_id != residue_id
+                    ],
+                ),
+            )
+            for candidate in enumerate_bp5_chi_rotamers(
+                atom_array=residue,
+                bond_pairs=bond_pairs,
+                residue_id=residue_id,
+            )
+        )
+        candidates.extend(residue_candidates)
+
+        residue_accepted = [
+            candidate
+            for candidate in residue_candidates
+            if rotamer_clash_cutoff is None
+            or candidate.clash_score <= rotamer_clash_cutoff
+        ]
+        residue_accepted = sorted(
+            residue_accepted,
+            key=lambda candidate: (candidate.clash_score, candidate.rotamer.name),
+        )
+        if max_rotamers_per_site is not None:
+            residue_accepted = residue_accepted[:max_rotamers_per_site]
+        accepted.extend(residue_accepted)
+
+    return BP5NanoringRotamerPlacement(
+        m=m,
+        nanoring=rigid_placement.nanoring,
+        rigid_sidechains=rigid_placement.sidechains,
+        anchor_pairs=rigid_placement.anchor_pairs,
+        rotamer_candidates=tuple(candidates),
+        accepted_rotamer_candidates=tuple(accepted),
+    )
+
+
 def write_bp5_nanoring_series(
     output_dir: str | Path = DEFAULT_GENERATED_DATA_DIR,
     m_values: Iterable[int] = DEFAULT_M_VALUES,
@@ -282,6 +393,42 @@ def write_bp5_nanoring_series(
             )
         )
     return written_paths
+
+
+def _score_bp5_rotamer_candidate(
+    candidate: struc.AtomArray,
+    nanoring: struc.AtomArray,
+    neighboring_sidechains: struc.AtomArray,
+) -> float:
+    candidate_without_virtual_carbons = _without_atom_names(
+        candidate,
+        BP5_VIRTUAL_CARBON_ATOMS,
+    )
+    scaffold_score = score_heavy_atom_clashes(
+        atom_array=candidate_without_virtual_carbons,
+        other=nanoring,
+    )
+    active_site_score = score_heavy_atom_clashes(
+        atom_array=_only_atom_names(candidate, BP5_FIXED_ACTIVE_SITE_ATOMS),
+        other=_only_atom_names(neighboring_sidechains, BP5_FIXED_ACTIVE_SITE_ATOMS),
+    )
+    return float(
+        scaffold_score.total_overlap_score + active_site_score.total_overlap_score
+    )
+
+
+def _only_atom_names(
+    atom_array: struc.AtomArray,
+    atom_names: frozenset[str],
+) -> struc.AtomArray:
+    return atom_array[np.isin(atom_array.atom_name, list(atom_names))]
+
+
+def _without_atom_names(
+    atom_array: struc.AtomArray,
+    atom_names: frozenset[str],
+) -> struc.AtomArray:
+    return atom_array[~np.isin(atom_array.atom_name, list(atom_names))]
 
 
 def _place_single_bp5_sidechain(
