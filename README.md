@@ -59,6 +59,27 @@ ring = generate_armchair_nanoring(n=6, units=1)
 print(ring.array_length())
 ```
 
+## Data Backup
+
+Local data under `data/` is intentionally not tracked by git. Use S3 sync for
+backup/restore once a private bucket exists:
+
+```bash
+export SWACANATASE_DATA_S3_URI=s3://your-bucket/swacanatase/data
+scripts/sync-data-s3 upload --dry-run
+scripts/sync-data-s3 upload
+scripts/sync-data-s3 download
+```
+
+The sync script accepts an explicit URI instead of the environment variable:
+
+```bash
+scripts/sync-data-s3 upload s3://your-bucket/swacanatase/data
+```
+
+`--delete` is supported for pruning the destination, but run it with
+`--dry-run` first.
+
 ## Tests
 
 ```bash

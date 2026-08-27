@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+"${repo_root}/scripts/sync-data-s3" upload s3://alphacarbon-swacanatase/data "$@"
