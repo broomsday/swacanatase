@@ -15,11 +15,19 @@ from .bp5_rotamers import BP5RotamerPlacement, enumerate_bp5_chi_rotamers
 from .clashes import score_heavy_atom_clashes
 from .ligands import DEFAULT_LIGAND_DIR, load_bp5_bond_pairs
 from .nanoring import generate_armchair_nanoring
+from .secondary_structure import (
+    SecondaryStructureType,
+    build_regular_secondary_structure_segment,
+)
 
 DEFAULT_M_VALUES = (18, 24, 30, 36)
 DEFAULT_GENERATED_DATA_DIR = Path("data/generated")
 DEFAULT_NANORING_OUTPUT_DIR = DEFAULT_GENERATED_DATA_DIR / "nanoring"
 DEFAULT_THEOZYME_OUTPUT_DIR = DEFAULT_GENERATED_DATA_DIR / "theozyme"
+DEFAULT_ROTAMER_OUTPUT_DIR = DEFAULT_GENERATED_DATA_DIR / "rotamers"
+DEFAULT_SECONDARY_STRUCTURE_OUTPUT_DIR = (
+    DEFAULT_GENERATED_DATA_DIR / "secondary_structure"
+)
 RING_AXIS = np.array([0.0, 0.0, 1.0], dtype=float)
 BP5_FIXED_ACTIVE_SITE_ATOMS = frozenset(
     {
@@ -358,13 +366,34 @@ def write_bp5_nanoring_series(
     snap_virtual_carbons: bool = False,
     file_format: str = "cif",
     overwrite: bool = False,
+    enumerate_bp5_rotamers: bool = False,
+    max_rotamers_per_site: int | None = None,
+    rotamer_clash_cutoff: float | None = None,
+    secondary_structure: SecondaryStructureType | None = None,
+    residues_before: int = 0,
+    residues_after: int = 0,
 ) -> list[Path]:
     """Write nanoring-only and BP5-placed structures for each requested M value."""
+    if max_rotamers_per_site is not None and max_rotamers_per_site < 1:
+        raise ValueError("max_rotamers_per_site must be at least 1")
+    if residues_before < 0 or residues_after < 0:
+        raise ValueError("residue counts must be non-negative")
+    if secondary_structure not in {None, "alpha_helix", "beta_strand"}:
+        raise ValueError(
+            "secondary_structure must be None, 'alpha_helix', or 'beta_strand'"
+        )
+
     output_dir = Path(output_dir)
     nanoring_output_dir = output_dir / "nanoring"
     theozyme_output_dir = output_dir / "theozyme"
+    rotamer_output_dir = output_dir / "rotamers"
+    secondary_structure_output_dir = output_dir / "secondary_structure"
     nanoring_output_dir.mkdir(parents=True, exist_ok=True)
     theozyme_output_dir.mkdir(parents=True, exist_ok=True)
+    if enumerate_bp5_rotamers:
+        rotamer_output_dir.mkdir(parents=True, exist_ok=True)
+    if secondary_structure is not None:
+        secondary_structure_output_dir.mkdir(parents=True, exist_ok=True)
 
     written_paths: list[Path] = []
     for m in m_values:
@@ -392,6 +421,63 @@ def write_bp5_nanoring_series(
                 overwrite=overwrite,
             )
         )
+
+        if not enumerate_bp5_rotamers and secondary_structure is None:
+            continue
+
+        rotamer_placement = place_bp5_rotamer_ensembles_around_nanoring(
+            m=m,
+            units=units,
+            anchor_phase_offset=anchor_phase_offset,
+            snap_virtual_carbons=snap_virtual_carbons,
+            max_rotamers_per_site=max_rotamers_per_site,
+            rotamer_clash_cutoff=rotamer_clash_cutoff,
+        )
+        for candidate in rotamer_placement.accepted_rotamer_candidates:
+            if enumerate_bp5_rotamers:
+                rotamer_path = (
+                    rotamer_output_dir
+                    / (
+                        f"nanoring_M{m}_site{candidate.residue_id:02d}_"
+                        f"{candidate.rotamer.name}.{file_format}"
+                    )
+                )
+                written_paths.append(
+                    write_structure(
+                        atom_array=struc.concatenate(
+                            [rotamer_placement.nanoring, candidate.atom_array]
+                        ),
+                        output_path=rotamer_path,
+                        file_format=file_format,
+                        overwrite=overwrite,
+                    )
+                )
+            if secondary_structure is not None:
+                segment = build_regular_secondary_structure_segment(
+                    bp5_rotamer=candidate,
+                    secondary_structure_type=secondary_structure,
+                    residues_before=residues_before,
+                    residues_after=residues_after,
+                    starting_atom_id=rotamer_placement.nanoring.array_length() + 1,
+                )
+                segment_path = (
+                    secondary_structure_output_dir
+                    / (
+                        f"nanoring_M{m}_site{candidate.residue_id:02d}_"
+                        f"{candidate.rotamer.name}_{secondary_structure}_"
+                        f"pre{residues_before}_post{residues_after}.{file_format}"
+                    )
+                )
+                written_paths.append(
+                    write_structure(
+                        atom_array=struc.concatenate(
+                            [rotamer_placement.nanoring, segment.atom_array]
+                        ),
+                        output_path=segment_path,
+                        file_format=file_format,
+                        overwrite=overwrite,
+                    )
+                )
     return written_paths
 
 
@@ -618,6 +704,44 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Overwrite CV1/CV2 coordinates onto the matched nanoring carbons.",
     )
+    parser.add_argument(
+        "--enumerate-bp5-rotamers",
+        action="store_true",
+        help="Also write accepted BP5 chi-rotamer complexes under rotamers/.",
+    )
+    parser.add_argument(
+        "--max-rotamers-per-site",
+        type=int,
+        default=None,
+        help="Keep only the top K accepted rotamers per BP5 site.",
+    )
+    parser.add_argument(
+        "--rotamer-clash-cutoff",
+        type=float,
+        default=None,
+        help="Reject rotamer candidates with clash scores above this value.",
+    )
+    parser.add_argument(
+        "--secondary-structure",
+        choices=["none", "alpha_helix", "beta_strand"],
+        default="none",
+        help=(
+            "Also write regular secondary-structure segment complexes under "
+            "secondary_structure/."
+        ),
+    )
+    parser.add_argument(
+        "--residues-before",
+        type=int,
+        default=0,
+        help="Number of residues to grow before BP5 in secondary-structure mode.",
+    )
+    parser.add_argument(
+        "--residues-after",
+        type=int,
+        default=0,
+        help="Number of residues to grow after BP5 in secondary-structure mode.",
+    )
     parser.add_argument("--format", choices=["pdb", "cif"], default="cif")
     parser.add_argument(
         "--output-dir",
@@ -639,6 +763,14 @@ def main(argv: list[str] | None = None) -> int:
         snap_virtual_carbons=args.snap_virtual_carbons,
         file_format=args.format,
         overwrite=args.overwrite,
+        enumerate_bp5_rotamers=args.enumerate_bp5_rotamers,
+        max_rotamers_per_site=args.max_rotamers_per_site,
+        rotamer_clash_cutoff=args.rotamer_clash_cutoff,
+        secondary_structure=(
+            None if args.secondary_structure == "none" else args.secondary_structure
+        ),
+        residues_before=args.residues_before,
+        residues_after=args.residues_after,
     )
     for path in written_paths:
         print(f"Wrote {path}")

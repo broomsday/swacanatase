@@ -292,7 +292,7 @@ Secondary-structure tests:
 
 ## CLI And Output Plan
 
-Status: Pending.
+Status: Complete for the first implementation pass.
 
 Keep the existing generation CLI stable. Add rotamer and secondary-structure
 outputs as opt-in modes.
@@ -327,7 +327,7 @@ Generated complexes should preserve the existing chain convention:
 6. [x] Integrate rotamer enumeration into nanoring placement as an opt-in workflow.
 7. [x] Add regular alpha-helix and beta-strand builders from accepted BP5 residue
    frames.
-8. [ ] Add CLI options and generated-output paths.
+8. [x] Add CLI options and generated-output paths.
 
 ## Acceptance Criteria
 

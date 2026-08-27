@@ -12,6 +12,7 @@ from swacanatase.placement import (
     central_para_linker_anchor_pairs,
     generate_m_equals_n_nanoring,
     generate_m_equals_n_nanorings,
+    main as placement_main,
     place_bp5_sidechains_around_nanoring,
     write_bp5_nanoring_series,
 )
@@ -153,6 +154,67 @@ def test_write_bp5_nanoring_series_separates_nanoring_and_theozyme_outputs(
         tmp_path / "theozyme" / "nanoring_M18_bp5.cif",
     ]
     assert all(path.exists() for path in written_paths)
+
+
+def test_write_bp5_nanoring_series_can_write_rotamer_and_secondary_structure_outputs(
+    tmp_path: Path,
+) -> None:
+    written_paths = write_bp5_nanoring_series(
+        output_dir=tmp_path,
+        m_values=(18,),
+        overwrite=True,
+        enumerate_bp5_rotamers=True,
+        max_rotamers_per_site=1,
+        secondary_structure="alpha_helix",
+        residues_before=1,
+        residues_after=1,
+    )
+
+    assert len(written_paths) == 2 + 9 + 9
+    assert written_paths[:2] == [
+        tmp_path / "nanoring" / "nanoring_M18.cif",
+        tmp_path / "theozyme" / "nanoring_M18_bp5.cif",
+    ]
+    assert all(path.exists() for path in written_paths)
+    assert sum(path.parent.name == "rotamers" for path in written_paths) == 9
+    assert (
+        sum(path.parent.name == "secondary_structure" for path in written_paths)
+        == 9
+    )
+    assert all(
+        "_alpha_helix_pre1_post1" in path.stem
+        for path in written_paths
+        if path.parent.name == "secondary_structure"
+    )
+
+
+def test_placement_cli_exposes_rotamer_and_secondary_structure_output_modes(
+    tmp_path: Path,
+) -> None:
+    exit_code = placement_main(
+        [
+            "--m",
+            "18",
+            "--output-dir",
+            str(tmp_path),
+            "--overwrite",
+            "--enumerate-bp5-rotamers",
+            "--max-rotamers-per-site",
+            "1",
+            "--secondary-structure",
+            "beta_strand",
+            "--residues-before",
+            "1",
+            "--residues-after",
+            "0",
+        ]
+    )
+
+    assert exit_code == 0
+    assert (tmp_path / "rotamers").is_dir()
+    assert (tmp_path / "secondary_structure").is_dir()
+    assert len(list((tmp_path / "rotamers").glob("*.cif"))) == 9
+    assert len(list((tmp_path / "secondary_structure").glob("*.cif"))) == 9
 
 
 def _atom_coord(atom_array, atom_name: str) -> np.ndarray:
