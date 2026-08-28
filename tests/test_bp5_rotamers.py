@@ -120,6 +120,15 @@ def test_nanoring_rotamer_ensemble_can_keep_top_k_per_site() -> None:
 
     assert len(placement.rotamer_candidates) == 9 * 6
     assert len(placement.accepted_rotamer_candidates) == 9 * 2
+    rotamer_names_by_residue = {
+        residue_id: tuple(
+            candidate.rotamer.name
+            for candidate in placement.accepted_rotamer_candidates
+            if candidate.residue_id == residue_id
+        )
+        for residue_id in range(1, 10)
+    }
+    assert len(set(rotamer_names_by_residue.values())) == 1
     for residue_id in range(1, 10):
         residue_scores = [
             candidate.clash_score
@@ -172,6 +181,38 @@ def test_nanoring_rotamer_ensemble_scores_secondary_structure_candidates() -> No
             np.linalg.norm(candidate.orientation_metrics.c_terminal_exit_vector),
             1.0,
         )
+
+
+def test_secondary_structure_candidates_keep_symmetric_rotamer_states() -> None:
+    placement = place_bp5_rotamer_ensembles_around_nanoring(
+        m=18,
+        cif_path=Path("data/rcsb/BP5.cif"),
+        max_rotamers_per_site=2,
+        secondary_structure="beta_strand",
+        residues_before=1,
+        residues_after=0,
+    )
+
+    accepted_rotamer_names_by_residue = {
+        residue_id: tuple(
+            candidate.rotamer.name
+            for candidate in placement.accepted_rotamer_candidates
+            if candidate.residue_id == residue_id
+        )
+        for residue_id in range(1, 10)
+    }
+    secondary_rotamer_names_by_residue = {
+        residue_id: tuple(
+            candidate.rotamer_candidate.rotamer.name
+            for candidate in placement.accepted_secondary_structure_candidates
+            if candidate.rotamer_candidate.residue_id == residue_id
+        )
+        for residue_id in range(1, 10)
+    }
+
+    assert len(placement.secondary_structure_candidates) == 9 * 2
+    assert len(set(accepted_rotamer_names_by_residue.values())) == 1
+    assert secondary_rotamer_names_by_residue == accepted_rotamer_names_by_residue
 
 
 def _coords_by_name(atom_array, atom_names: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:

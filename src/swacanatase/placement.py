@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import defaultdict
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable
@@ -366,7 +367,6 @@ def place_bp5_rotamer_ensembles_around_nanoring(
     bond_pairs = load_bp5_bond_pairs(cif_path=cif_path)
 
     candidates: list[BP5RotamerPlacement] = []
-    accepted: list[BP5RotamerPlacement] = []
     for residue_id in range(1, len(rigid_placement.anchor_pairs) + 1):
         residue = rigid_placement.sidechains[
             rigid_placement.sidechains.res_id == residue_id
@@ -390,25 +390,18 @@ def place_bp5_rotamer_ensembles_around_nanoring(
         )
         candidates.extend(residue_candidates)
 
-        residue_accepted = [
-            candidate
-            for candidate in residue_candidates
-            if rotamer_clash_cutoff is None
-            or candidate.clash_score <= rotamer_clash_cutoff
-        ]
-        residue_accepted = sorted(
-            residue_accepted,
-            key=lambda candidate: (candidate.clash_score, candidate.rotamer.name),
-        )
-        if max_rotamers_per_site is not None:
-            residue_accepted = residue_accepted[:max_rotamers_per_site]
-        accepted.extend(residue_accepted)
+    accepted = _select_symmetric_rotamer_candidates(
+        candidates=tuple(candidates),
+        residue_count=len(rigid_placement.anchor_pairs),
+        rotamer_clash_cutoff=rotamer_clash_cutoff,
+        max_rotamer_states=max_rotamers_per_site,
+    )
 
     secondary_candidates: tuple[BP5SecondaryStructurePlacement, ...] = ()
     accepted_secondary_candidates: tuple[BP5SecondaryStructurePlacement, ...] = ()
     if secondary_structure is not None:
         secondary_candidates = _build_secondary_structure_candidates(
-            rotamer_candidates=tuple(accepted),
+            rotamer_candidates=accepted,
             nanoring=rigid_placement.nanoring,
             rigid_sidechains=rigid_placement.sidechains,
             anchor_pairs=rigid_placement.anchor_pairs,
@@ -417,11 +410,10 @@ def place_bp5_rotamer_ensembles_around_nanoring(
             residues_after=residues_after,
             starting_atom_id=rigid_placement.nanoring.array_length() + 1,
         )
-        accepted_secondary_candidates = tuple(
-            candidate
-            for candidate in secondary_candidates
-            if secondary_structure_clash_cutoff is None
-            or candidate.clash_score <= secondary_structure_clash_cutoff
+        accepted_secondary_candidates = _select_symmetric_secondary_candidates(
+            candidates=secondary_candidates,
+            residue_count=len(rigid_placement.anchor_pairs),
+            clash_cutoff=secondary_structure_clash_cutoff,
         )
 
     return BP5NanoringRotamerPlacement(
@@ -430,7 +422,7 @@ def place_bp5_rotamer_ensembles_around_nanoring(
         rigid_sidechains=rigid_placement.sidechains,
         anchor_pairs=rigid_placement.anchor_pairs,
         rotamer_candidates=tuple(candidates),
-        accepted_rotamer_candidates=tuple(accepted),
+        accepted_rotamer_candidates=accepted,
         secondary_structure_candidates=secondary_candidates,
         accepted_secondary_structure_candidates=accepted_secondary_candidates,
     )
@@ -558,6 +550,152 @@ def write_bp5_nanoring_series(
     return written_paths
 
 
+def _select_symmetric_rotamer_candidates(
+    candidates: tuple[BP5RotamerPlacement, ...],
+    residue_count: int,
+    rotamer_clash_cutoff: float | None,
+    max_rotamer_states: int | None,
+) -> tuple[BP5RotamerPlacement, ...]:
+    groups: defaultdict[str, list[BP5RotamerPlacement]] = defaultdict(list)
+    for candidate in candidates:
+        groups[candidate.rotamer.name].append(candidate)
+
+    accepted_groups: list[tuple[BP5RotamerPlacement, ...]] = []
+    for group in groups.values():
+        ordered_group = _complete_symmetric_rotamer_group(group, residue_count)
+        if rotamer_clash_cutoff is not None and any(
+            candidate.clash_score > rotamer_clash_cutoff
+            for candidate in ordered_group
+        ):
+            continue
+        accepted_groups.append(ordered_group)
+
+    accepted_groups = sorted(accepted_groups, key=_rotamer_group_score_key)
+    if max_rotamer_states is not None:
+        accepted_groups = accepted_groups[:max_rotamer_states]
+
+    group_rank = {
+        group[0].rotamer.name: rank
+        for rank, group in enumerate(accepted_groups)
+    }
+    return tuple(
+        sorted(
+            (
+                candidate
+                for group in accepted_groups
+                for candidate in group
+            ),
+            key=lambda candidate: (
+                candidate.residue_id,
+                group_rank[candidate.rotamer.name],
+            ),
+        )
+    )
+
+
+def _complete_symmetric_rotamer_group(
+    group: Iterable[BP5RotamerPlacement],
+    residue_count: int,
+) -> tuple[BP5RotamerPlacement, ...]:
+    ordered_group = tuple(sorted(group, key=lambda candidate: candidate.residue_id))
+    residue_ids = tuple(candidate.residue_id for candidate in ordered_group)
+    expected_residue_ids = tuple(range(1, residue_count + 1))
+    if residue_ids != expected_residue_ids:
+        rotamer_name = ordered_group[0].rotamer.name if ordered_group else "<empty>"
+        raise ValueError(
+            f"rotamer state {rotamer_name!r} must be represented at every BP5 site"
+        )
+    return ordered_group
+
+
+def _rotamer_group_score_key(
+    group: tuple[BP5RotamerPlacement, ...],
+) -> tuple[float, float, str]:
+    clash_scores = [candidate.clash_score for candidate in group]
+    return (
+        float(sum(clash_scores)),
+        float(max(clash_scores)),
+        group[0].rotamer.name,
+    )
+
+
+def _select_symmetric_secondary_candidates(
+    candidates: tuple[BP5SecondaryStructurePlacement, ...],
+    residue_count: int,
+    clash_cutoff: float | None,
+) -> tuple[BP5SecondaryStructurePlacement, ...]:
+    groups: defaultdict[str, list[BP5SecondaryStructurePlacement]] = defaultdict(list)
+    for candidate in candidates:
+        groups[candidate.rotamer_candidate.rotamer.name].append(candidate)
+
+    accepted_groups: list[tuple[BP5SecondaryStructurePlacement, ...]] = []
+    for group in groups.values():
+        ordered_group = _complete_symmetric_secondary_group(group, residue_count)
+        if clash_cutoff is not None and any(
+            candidate.clash_score > clash_cutoff
+            for candidate in ordered_group
+        ):
+            continue
+        accepted_groups.append(ordered_group)
+
+    group_rank = {
+        group[0].rotamer_candidate.rotamer.name: rank
+        for rank, group in enumerate(
+            sorted(accepted_groups, key=_secondary_group_score_key)
+        )
+    }
+    return tuple(
+        sorted(
+            (
+                candidate
+                for group in accepted_groups
+                for candidate in group
+            ),
+            key=lambda candidate: (
+                candidate.rotamer_candidate.residue_id,
+                group_rank[candidate.rotamer_candidate.rotamer.name],
+            ),
+        )
+    )
+
+
+def _complete_symmetric_secondary_group(
+    group: Iterable[BP5SecondaryStructurePlacement],
+    residue_count: int,
+) -> tuple[BP5SecondaryStructurePlacement, ...]:
+    ordered_group = tuple(
+        sorted(
+            group,
+            key=lambda candidate: candidate.rotamer_candidate.residue_id,
+        )
+    )
+    residue_ids = tuple(
+        candidate.rotamer_candidate.residue_id for candidate in ordered_group
+    )
+    expected_residue_ids = tuple(range(1, residue_count + 1))
+    if residue_ids != expected_residue_ids:
+        rotamer_name = (
+            ordered_group[0].rotamer_candidate.rotamer.name
+            if ordered_group
+            else "<empty>"
+        )
+        raise ValueError(
+            f"secondary-structure state {rotamer_name!r} must cover every BP5 site"
+        )
+    return ordered_group
+
+
+def _secondary_group_score_key(
+    group: tuple[BP5SecondaryStructurePlacement, ...],
+) -> tuple[float, float, str]:
+    clash_scores = [candidate.clash_score for candidate in group]
+    return (
+        float(sum(clash_scores)),
+        float(max(clash_scores)),
+        group[0].rotamer_candidate.rotamer.name,
+    )
+
+
 def _build_secondary_structure_candidates(
     rotamer_candidates: tuple[BP5RotamerPlacement, ...],
     nanoring: struc.AtomArray,
@@ -581,42 +719,57 @@ def _build_secondary_structure_candidates(
         )
         for candidate in rotamer_candidates
     )
+    segment_pairs_by_rotamer: defaultdict[
+        str,
+        list[tuple[BP5RotamerPlacement, SecondaryStructureSegment]],
+    ] = defaultdict(list)
+    for candidate, segment in segment_pairs:
+        segment_pairs_by_rotamer[candidate.rotamer.name].append((candidate, segment))
 
     scored_candidates: list[BP5SecondaryStructurePlacement] = []
-    for candidate, segment in segment_pairs:
-        neighboring_segments = tuple(
-            neighboring_segment
-            for neighboring_candidate, neighboring_segment in segment_pairs
-            if neighboring_candidate.residue_id != candidate.residue_id
-        )
-        bp5_context = _bp5_context_for_secondary_structure_candidate(
-            candidate=candidate,
-            rigid_sidechains=rigid_sidechains,
-        )
-        score = score_secondary_structure_segment_clashes(
-            segment=segment,
-            nanoring=nanoring,
-            bp5_context=bp5_context,
-            neighboring_segments=neighboring_segments,
-        )
-        anchor_pair = anchor_pairs[candidate.residue_id - 1]
-        orientation_metrics = measure_secondary_structure_orientation(
-            segment=segment,
-            radial_direction=anchor_pair.radial_direction,
-            tangential_direction=anchor_pair.tangential_direction,
-            ring_axis=anchor_pair.ring_axis,
-        )
-        scored_candidates.append(
-            BP5SecondaryStructurePlacement(
-                rotamer_candidate=candidate,
-                segment=segment,
-                orientation_metrics=orientation_metrics,
-                scaffold_clash_score=score.scaffold_score,
-                bp5_clash_score=score.bp5_score,
-                neighboring_backbone_clash_score=score.neighboring_backbone_score,
-                clash_score=score.total_overlap_score,
+    for rotamer_name in sorted(segment_pairs_by_rotamer):
+        symmetric_segment_pairs = tuple(
+            sorted(
+                segment_pairs_by_rotamer[rotamer_name],
+                key=lambda pair: pair[0].residue_id,
             )
         )
+        for candidate, segment in symmetric_segment_pairs:
+            neighboring_segments = tuple(
+                neighboring_segment
+                for neighboring_candidate, neighboring_segment in (
+                    symmetric_segment_pairs
+                )
+                if neighboring_candidate.residue_id != candidate.residue_id
+            )
+            bp5_context = _bp5_context_for_secondary_structure_candidate(
+                candidate=candidate,
+                rigid_sidechains=rigid_sidechains,
+            )
+            score = score_secondary_structure_segment_clashes(
+                segment=segment,
+                nanoring=nanoring,
+                bp5_context=bp5_context,
+                neighboring_segments=neighboring_segments,
+            )
+            anchor_pair = anchor_pairs[candidate.residue_id - 1]
+            orientation_metrics = measure_secondary_structure_orientation(
+                segment=segment,
+                radial_direction=anchor_pair.radial_direction,
+                tangential_direction=anchor_pair.tangential_direction,
+                ring_axis=anchor_pair.ring_axis,
+            )
+            scored_candidates.append(
+                BP5SecondaryStructurePlacement(
+                    rotamer_candidate=candidate,
+                    segment=segment,
+                    orientation_metrics=orientation_metrics,
+                    scaffold_clash_score=score.scaffold_score,
+                    bp5_clash_score=score.bp5_score,
+                    neighboring_backbone_clash_score=score.neighboring_backbone_score,
+                    clash_score=score.total_overlap_score,
+                )
+            )
     return tuple(
         sorted(
             scored_candidates,
@@ -875,7 +1028,10 @@ def main(argv: list[str] | None = None) -> int:
         "--max-rotamers-per-site",
         type=int,
         default=None,
-        help="Keep only the top K accepted rotamers per BP5 site.",
+        help=(
+            "Keep only the top K symmetric rotamer states, with each state "
+            "represented at every BP5 site."
+        ),
     )
     parser.add_argument(
         "--rotamer-clash-cutoff",

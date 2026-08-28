@@ -182,7 +182,8 @@ Recommended behavior:
    - the carbon scaffold
    - neighboring placed BP5 active-site cores
    - neighboring candidate backbones
-7. Keep either all accepted candidates or the top `k` candidates per site.
+7. Keep either all accepted symmetric rotamer states or the top `k` symmetric
+   states, with every retained state represented at every BP5 site.
 
 The existing `place_bp5_sidechains_around_nanoring()` should remain available as
 the rigid baseline and as a source of regression tests.
@@ -309,7 +310,8 @@ outputs as opt-in modes.
 Possible options:
 
 - `--enumerate-bp5-rotamers`
-- `--max-rotamers-per-site K`
+- `--max-rotamers-per-site K`, interpreted as top `K` symmetric rotamer states
+  across the full ring
 - `--rotamer-clash-cutoff VALUE`
 - `--secondary-structure {none,alpha_helix,beta_strand}`
 - `--residues-before N`
