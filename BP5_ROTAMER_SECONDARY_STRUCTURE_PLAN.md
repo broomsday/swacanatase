@@ -159,10 +159,9 @@ added as weights or ranking priors without changing the geometric machinery.
 
 Status: Complete for the first implementation pass. The opt-in nanoring rotamer
 ensemble workflow is in place, including rigid BP5/Pd placement reuse, per-site
-rotamer enumeration, realized chi measurement, scaffold clash scoring,
-neighboring active-site-core scoring, cutoff filtering, top-`k` selection,
-secondary-structure candidate generation, and post-growth neighboring
-candidate-backbone clash scoring.
+rotamer enumeration, realized chi measurement, full symmetric-state clash
+scoring, cutoff filtering, top-`k` selection, secondary-structure candidate
+generation, and full-state secondary-structure clash scoring.
 
 Extend the current workflow in `src/swacanatase/placement.py` without replacing
 the existing rigid BP5 placement behavior.
@@ -178,10 +177,11 @@ Recommended behavior:
 3. Rigidly place one active BP5/Pd unit at each anchor exactly as today.
 4. For each placed residue, enumerate the BP5 chi rotamer grid.
 5. Measure `chi1`/`chi2` after each transform and store the realized values.
-6. Clash-score each candidate against:
+6. Clash-score each complete symmetric state against:
    - the carbon scaffold
-   - neighboring placed BP5 active-site cores
-   - neighboring candidate backbones
+   - BP5/Pd atoms within and across all retained positions
+   - generated secondary-structure atoms against BP5 context and across all
+     retained positions
 7. Keep either all accepted symmetric rotamer states or the top `k` symmetric
    states, with every retained state represented at every BP5 site.
 
@@ -321,8 +321,9 @@ Possible options:
 Suggested output directories:
 
 - `data/generated/theozyme/` for rigid BP5/Pd baseline structures
-- `data/generated/rotamers/` for BP5 chi-rotamer ensembles
-- `data/generated/secondary_structure/` for helix/strand segment models
+- `data/generated/rotamers/` for full symmetric BP5 chi-rotamer ensembles
+- `data/generated/secondary_structure/` for full symmetric helix/strand segment
+  models
 
 Generated complexes should preserve the existing chain convention:
 

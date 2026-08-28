@@ -20,6 +20,8 @@ Implemented pieces include:
   pairs.
 - Placement of `M/2` BP5/Pd sidechains around default `M = 18, 24, 30, 36`
   nanoring scaffolds.
+- Full symmetric BP5 chi-rotamer state scoring and optional full-state rotamer
+  and secondary-structure outputs.
 
 ## Setup
 
@@ -115,6 +117,10 @@ and the carbon scaffold uses chain `B`.
 By default, `CV1` and `CV2` keep the ideal catalytic geometry and are rigid-fit
 to minimize residuals against the selected adjacent scaffold carbons. Use
 `--snap-virtual-carbons` only when exact virtual-carbon overlap is desired.
+
+Rotamer and secondary-structure output modes evaluate and write complete
+symmetric states. For example, `--max-rotamers-per-site 1` writes one rotamer
+complex containing all `M/2` BP5 positions, not one file per position.
 
 Useful options:
 

@@ -170,17 +170,18 @@ def test_write_bp5_nanoring_series_can_write_rotamer_and_secondary_structure_out
         residues_after=1,
     )
 
-    assert len(written_paths) == 2 + 9 + 9
+    assert len(written_paths) == 2 + 1 + 1
     assert written_paths[:2] == [
         tmp_path / "nanoring" / "nanoring_M18.cif",
         tmp_path / "theozyme" / "nanoring_M18_bp5.cif",
     ]
     assert all(path.exists() for path in written_paths)
-    assert sum(path.parent.name == "rotamers" for path in written_paths) == 9
+    assert sum(path.parent.name == "rotamers" for path in written_paths) == 1
     assert (
         sum(path.parent.name == "secondary_structure" for path in written_paths)
-        == 9
+        == 1
     )
+    assert tmp_path / "rotamers" / "nanoring_M18_gplus_m90.cif" in written_paths
     assert all(
         "_alpha_helix_pre1_post1" in path.stem
         for path in written_paths
@@ -213,8 +214,8 @@ def test_placement_cli_exposes_rotamer_and_secondary_structure_output_modes(
     assert exit_code == 0
     assert (tmp_path / "rotamers").is_dir()
     assert (tmp_path / "secondary_structure").is_dir()
-    assert len(list((tmp_path / "rotamers").glob("*.cif"))) == 9
-    assert len(list((tmp_path / "secondary_structure").glob("*.cif"))) == 9
+    assert len(list((tmp_path / "rotamers").glob("*.cif"))) == 1
+    assert len(list((tmp_path / "secondary_structure").glob("*.cif"))) == 1
 
 
 def _atom_coord(atom_array, atom_name: str) -> np.ndarray:

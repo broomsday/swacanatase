@@ -101,6 +101,8 @@ def test_nanoring_rotamer_ensemble_produces_six_raw_candidates_per_site() -> Non
     )
 
     assert len(placement.anchor_pairs) == 9
+    assert len(placement.rotamer_states) == 6
+    assert len(placement.accepted_rotamer_states) == 6
     assert len(placement.rotamer_candidates) == 9 * 6
     assert len(placement.accepted_rotamer_candidates) == 9 * 6
     assert {candidate.residue_id for candidate in placement.rotamer_candidates} == set(
@@ -109,9 +111,24 @@ def test_nanoring_rotamer_ensemble_produces_six_raw_candidates_per_site() -> Non
     assert all(
         candidate.clash_score >= 0.0 for candidate in placement.rotamer_candidates
     )
+    for state in placement.rotamer_states:
+        assert len(state.candidates) == 9
+        assert state.sidechains.array_length() == 9 * 34
+        assert {candidate.residue_id for candidate in state.candidates} == set(
+            range(1, 10)
+        )
+        assert all(
+            np.isclose(candidate.clash_score, state.clash_score)
+            for candidate in state.candidates
+        )
+    state_scores = {
+        state.rotamer_name: state.clash_score for state in placement.rotamer_states
+    }
+    assert state_scores["gminus_m90"] > state_scores["gplus_m90"]
+    assert state_scores["gminus_p90"] > state_scores["gplus_p90"]
 
 
-def test_nanoring_rotamer_ensemble_can_keep_top_k_per_site() -> None:
+def test_nanoring_rotamer_ensemble_can_keep_top_k_symmetric_states() -> None:
     placement = place_bp5_rotamer_ensembles_around_nanoring(
         m=18,
         cif_path=Path("data/rcsb/BP5.cif"),
@@ -119,6 +136,10 @@ def test_nanoring_rotamer_ensemble_can_keep_top_k_per_site() -> None:
     )
 
     assert len(placement.rotamer_candidates) == 9 * 6
+    assert [state.rotamer_name for state in placement.accepted_rotamer_states] == [
+        "gplus_m90",
+        "gplus_p90",
+    ]
     assert len(placement.accepted_rotamer_candidates) == 9 * 2
     rotamer_names_by_residue = {
         residue_id: tuple(
@@ -149,14 +170,34 @@ def test_nanoring_rotamer_ensemble_scores_secondary_structure_candidates() -> No
     )
 
     assert len(placement.accepted_rotamer_candidates) == 9
+    assert len(placement.accepted_rotamer_states) == 1
+    assert len(placement.secondary_structure_states) == 1
+    assert len(placement.accepted_secondary_structure_states) == 1
     assert len(placement.secondary_structure_candidates) == 9
     assert len(placement.accepted_secondary_structure_candidates) == 9
+    secondary_state = placement.secondary_structure_states[0]
+    assert len(secondary_state.candidates) == 9
+    assert secondary_state.segments.array_length() == sum(
+        candidate.segment.atom_array.array_length()
+        for candidate in secondary_state.candidates
+    )
+    assert len(set(secondary_state.segments.atom_id.tolist())) == (
+        secondary_state.segments.array_length()
+    )
+    assert len(set(secondary_state.segments.res_id.tolist())) == 9 * 3
+    assert np.isclose(
+        secondary_state.clash_score,
+        secondary_state.scaffold_clash_score
+        + secondary_state.bp5_clash_score
+        + secondary_state.neighboring_backbone_clash_score,
+    )
     for candidate in placement.secondary_structure_candidates:
         assert candidate.segment.residues_before == 1
         assert candidate.segment.residues_after == 1
         assert candidate.scaffold_clash_score >= 0.0
         assert candidate.bp5_clash_score >= 0.0
         assert candidate.neighboring_backbone_clash_score >= 0.0
+        assert np.isclose(candidate.clash_score, secondary_state.clash_score)
         assert np.isclose(
             candidate.clash_score,
             candidate.scaffold_clash_score
