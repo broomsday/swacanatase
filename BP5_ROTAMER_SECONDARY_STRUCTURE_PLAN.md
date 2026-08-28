@@ -213,8 +213,8 @@ Initial output fields:
 
 ## Secondary-Structure Growth
 
-Status: Complete for the first implementation pass, including post-growth clash
-scoring and orientation metrics.
+Status: Complete for the first implementation pass, including terminal atom
+normalization, post-growth clash scoring, and orientation metrics.
 
 Only after BP5 rotamer candidates are generated and filtered should regular
 secondary structure be attached.
@@ -239,8 +239,8 @@ Initial deterministic backbone targets:
 
 For internal protein segments, replace terminal-only BP5 atoms as needed:
 
-- drop `OXT` and `HXT` when BP5 is embedded in a chain
-- normalize terminal hydrogens in generated peptides rather than preserving CCD
+- [x] drop `OXT` and `HXT` when BP5 is embedded in a chain
+- [x] normalize terminal hydrogens in generated peptides rather than preserving CCD
   terminal annotations blindly
 
 Secondary-structure candidates are scored and measured after growth, not before:

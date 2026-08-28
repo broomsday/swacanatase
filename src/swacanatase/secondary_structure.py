@@ -13,16 +13,23 @@ from .clashes import score_heavy_atom_clashes
 SecondaryStructureType = Literal["alpha_helix", "beta_strand"]
 
 BACKBONE_ATOM_NAMES = ("N", "CA", "C", "O")
+BP5_TERMINAL_ATOM_NAMES = ("H", "H2", "OXT", "HXT")
 
 N_CA_BOND_LENGTH = 1.458
 CA_C_BOND_LENGTH = 1.525
 C_N_BOND_LENGTH = 1.329
 C_O_BOND_LENGTH = 1.229
+C_OXT_BOND_LENGTH = 1.343
+N_H_BOND_LENGTH = 1.010
+OXT_HXT_BOND_LENGTH = 0.967
 
 C_N_CA_ANGLE_DEGREES = 121.7
 N_CA_C_ANGLE_DEGREES = 111.2
 CA_C_N_ANGLE_DEGREES = 116.2
 CA_C_O_ANGLE_DEGREES = 120.8
+CA_C_OXT_ANGLE_DEGREES = 120.8
+CA_N_H_ANGLE_DEGREES = 109.5
+C_OXT_HXT_ANGLE_DEGREES = 109.5
 TRANS_PEPTIDE_OMEGA_DEGREES = 180.0
 CARBONYL_O_DIHEDRAL_DEGREES = 180.0
 
@@ -113,15 +120,19 @@ def build_regular_secondary_structure_segment(
     next_atom_id = starting_atom_id
     for residue_id in range(starting_residue_id, bp5_residue_id):
         local_residue_id = residue_id - starting_residue_id + 1
+        previous_coords = backbone_coords.get(local_residue_id - 1)
+        next_coords = backbone_coords.get(local_residue_id + 1)
         arrays.append(
             _new_backbone_residue(
                 residue_id=residue_id,
                 chain_id=chain_id,
                 coordinates=backbone_coords[local_residue_id],
+                previous_coordinates=previous_coords,
+                next_coordinates=next_coords,
                 starting_atom_id=next_atom_id,
             )
         )
-        next_atom_id += len(BACKBONE_ATOM_NAMES)
+        next_atom_id += arrays[-1].array_length()
 
     prepared_bp5 = _prepare_bp5_residue(
         bp5=bp5,
@@ -130,21 +141,26 @@ def build_regular_secondary_structure_segment(
         starting_atom_id=next_atom_id,
         has_previous=residues_before > 0,
         has_next=residues_after > 0,
+        previous_coordinates=backbone_coords.get(residues_before),
     )
     arrays.append(prepared_bp5)
     next_atom_id += prepared_bp5.array_length()
 
     for residue_id in range(bp5_residue_id + 1, bp5_residue_id + residues_after + 1):
         local_residue_id = residue_id - starting_residue_id + 1
+        previous_coords = backbone_coords.get(local_residue_id - 1)
+        next_coords = backbone_coords.get(local_residue_id + 1)
         arrays.append(
             _new_backbone_residue(
                 residue_id=residue_id,
                 chain_id=chain_id,
                 coordinates=backbone_coords[local_residue_id],
+                previous_coordinates=previous_coords,
+                next_coordinates=next_coords,
                 starting_atom_id=next_atom_id,
             )
         )
-        next_atom_id += len(BACKBONE_ATOM_NAMES)
+        next_atom_id += arrays[-1].array_length()
 
     return SecondaryStructureSegment(
         secondary_structure_type=secondary_structure_type,
@@ -342,18 +358,33 @@ def _new_backbone_residue(
     residue_id: int,
     chain_id: str,
     coordinates: dict[str, np.ndarray],
+    previous_coordinates: dict[str, np.ndarray] | None,
+    next_coordinates: dict[str, np.ndarray] | None,
     starting_atom_id: int,
 ) -> struc.AtomArray:
-    atom_count = len(BACKBONE_ATOM_NAMES)
+    atom_names = list(BACKBONE_ATOM_NAMES)
+    elements = ["N", "C", "C", "O"]
+    coords = [coordinates[name] for name in BACKBONE_ATOM_NAMES]
+
+    for atom_name, element, coord in _peptide_cap_atom_records(
+        coordinates=coordinates,
+        previous_coordinates=previous_coordinates,
+        next_coordinates=next_coordinates,
+    ):
+        atom_names.append(atom_name)
+        elements.append(element)
+        coords.append(coord)
+
+    atom_count = len(atom_names)
     atoms = struc.AtomArray(atom_count)
-    atoms.coord = np.array([coordinates[name] for name in BACKBONE_ATOM_NAMES])
+    atoms.coord = np.array(coords)
     atoms.chain_id = np.full(atom_count, chain_id, dtype="U4")
     atoms.res_id = np.full(atom_count, residue_id, dtype=int)
     atoms.ins_code = np.full(atom_count, "", dtype="U1")
     atoms.res_name = np.full(atom_count, "GLY", dtype="U5")
     atoms.hetero = np.zeros(atom_count, dtype=bool)
-    atoms.atom_name = np.array(BACKBONE_ATOM_NAMES, dtype="U6")
-    atoms.element = np.array(("N", "C", "C", "O"), dtype="U2")
+    atoms.atom_name = np.array(atom_names, dtype="U6")
+    atoms.element = np.array(elements, dtype="U2")
     atoms.set_annotation(
         "atom_id",
         np.arange(starting_atom_id, starting_atom_id + atom_count, dtype=int),
@@ -370,14 +401,34 @@ def _prepare_bp5_residue(
     starting_atom_id: int,
     has_previous: bool,
     has_next: bool,
+    previous_coordinates: dict[str, np.ndarray] | None,
 ) -> struc.AtomArray:
-    terminal_atom_names: set[str] = set()
-    if has_previous:
-        terminal_atom_names.add("H2")
-    if has_next:
-        terminal_atom_names.update(("OXT", "HXT"))
+    if has_previous and previous_coordinates is None:
+        raise ValueError("previous_coordinates are required for internal BP5 N-H")
 
-    prepared = bp5[~np.isin(bp5.atom_name, list(terminal_atom_names))].copy()
+    prepared = bp5[~np.isin(bp5.atom_name, list(BP5_TERMINAL_ATOM_NAMES))].copy()
+    terminal_records = _peptide_cap_atom_records(
+        coordinates={
+            atom_name: _atom_coord(bp5, atom_name).copy()
+            for atom_name in BACKBONE_ATOM_NAMES
+        },
+        previous_coordinates=previous_coordinates,
+        next_coordinates={} if has_next else None,
+    )
+    if terminal_records:
+        prepared = struc.concatenate(
+            [
+                prepared,
+                _new_terminal_atom_array(
+                    atom_records=terminal_records,
+                    residue_id=int(prepared.res_id[0]),
+                    chain_id=str(prepared.chain_id[0]),
+                    res_name=str(prepared.res_name[0]),
+                    hetero=bool(prepared.hetero[0]),
+                    starting_atom_id=1,
+                ),
+            ]
+        )
     prepared.chain_id = np.full(prepared.array_length(), chain_id, dtype="U4")
     prepared.res_id = np.full(prepared.array_length(), residue_id, dtype=int)
     prepared.set_annotation(
@@ -389,6 +440,163 @@ def _prepare_bp5_residue(
         ),
     )
     return prepared
+
+
+def _peptide_cap_atom_records(
+    coordinates: dict[str, np.ndarray],
+    previous_coordinates: dict[str, np.ndarray] | None,
+    next_coordinates: dict[str, np.ndarray] | None,
+) -> list[tuple[str, str, np.ndarray]]:
+    atom_records: list[tuple[str, str, np.ndarray]] = []
+    n_coord = coordinates["N"]
+    ca_coord = coordinates["CA"]
+    c_coord = coordinates["C"]
+    o_coord = coordinates["O"]
+
+    if previous_coordinates is None:
+        h_coord, h2_coord = _terminal_n_hydrogen_coords(
+            n_coord=n_coord,
+            ca_coord=ca_coord,
+            c_coord=c_coord,
+        )
+        atom_records.extend(
+            [
+                ("H", "H", h_coord),
+                ("H2", "H", h2_coord),
+            ]
+        )
+    else:
+        atom_records.append(
+            (
+                "H",
+                "H",
+                _internal_n_hydrogen_coord(
+                    previous_c_coord=previous_coordinates["C"],
+                    n_coord=n_coord,
+                    ca_coord=ca_coord,
+                ),
+            )
+        )
+
+    if next_coordinates is None:
+        oxt_coord = _terminal_oxt_coord(
+            ca_coord=ca_coord,
+            c_coord=c_coord,
+            o_coord=o_coord,
+        )
+        hxt_coord = _terminal_hxt_coord(
+            ca_coord=ca_coord,
+            c_coord=c_coord,
+            o_coord=o_coord,
+            oxt_coord=oxt_coord,
+        )
+        atom_records.extend(
+            [
+                ("OXT", "O", oxt_coord),
+                ("HXT", "H", hxt_coord),
+            ]
+        )
+
+    return atom_records
+
+
+def _new_terminal_atom_array(
+    atom_records: list[tuple[str, str, np.ndarray]],
+    residue_id: int,
+    chain_id: str,
+    res_name: str,
+    hetero: bool,
+    starting_atom_id: int,
+) -> struc.AtomArray:
+    atoms = struc.AtomArray(len(atom_records))
+    atoms.coord = np.array([coord for _, _, coord in atom_records], dtype=float)
+    atoms.chain_id = np.full(len(atom_records), chain_id, dtype="U4")
+    atoms.res_id = np.full(len(atom_records), residue_id, dtype=int)
+    atoms.ins_code = np.full(len(atom_records), "", dtype="U1")
+    atoms.res_name = np.full(len(atom_records), res_name, dtype="U5")
+    atoms.hetero = np.full(len(atom_records), hetero, dtype=bool)
+    atoms.atom_name = np.array([name for name, _, _ in atom_records], dtype="U6")
+    atoms.element = np.array([element for _, element, _ in atom_records], dtype="U2")
+    atoms.set_annotation(
+        "atom_id",
+        np.arange(starting_atom_id, starting_atom_id + len(atom_records), dtype=int),
+    )
+    atoms.set_annotation("occupancy", np.ones(len(atom_records), dtype=float))
+    atoms.set_annotation("b_factor", np.zeros(len(atom_records), dtype=float))
+    return atoms
+
+
+def _internal_n_hydrogen_coord(
+    previous_c_coord: np.ndarray,
+    n_coord: np.ndarray,
+    ca_coord: np.ndarray,
+) -> np.ndarray:
+    direction = -_unit(
+        _unit(previous_c_coord - n_coord)
+        + _unit(ca_coord - n_coord)
+    )
+    return n_coord + N_H_BOND_LENGTH * direction
+
+
+def _terminal_n_hydrogen_coords(
+    n_coord: np.ndarray,
+    ca_coord: np.ndarray,
+    c_coord: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    ca_axis = _unit(ca_coord - n_coord)
+    reference = c_coord - ca_coord
+    perpendicular = _unit(reference - np.dot(reference, ca_axis) * ca_axis)
+    orthogonal = np.cross(ca_axis, perpendicular)
+    theta = np.radians(CA_N_H_ANGLE_DEGREES)
+    first_direction = (
+        np.cos(theta) * ca_axis
+        + np.sin(theta)
+        * (
+            np.cos(np.radians(120.0)) * perpendicular
+            + np.sin(np.radians(120.0)) * orthogonal
+        )
+    )
+    second_direction = (
+        np.cos(theta) * ca_axis
+        + np.sin(theta)
+        * (
+            np.cos(np.radians(240.0)) * perpendicular
+            + np.sin(np.radians(240.0)) * orthogonal
+        )
+    )
+    return (
+        n_coord + N_H_BOND_LENGTH * first_direction,
+        n_coord + N_H_BOND_LENGTH * second_direction,
+    )
+
+
+def _terminal_oxt_coord(
+    ca_coord: np.ndarray,
+    c_coord: np.ndarray,
+    o_coord: np.ndarray,
+) -> np.ndarray:
+    ca_direction = _unit(ca_coord - c_coord)
+    o_direction = _unit(o_coord - c_coord)
+    o_perpendicular = _unit(o_direction - np.dot(o_direction, ca_direction) * ca_direction)
+    angle = np.radians(CA_C_OXT_ANGLE_DEGREES)
+    oxt_direction = np.cos(angle) * ca_direction - np.sin(angle) * o_perpendicular
+    return c_coord + C_OXT_BOND_LENGTH * oxt_direction
+
+
+def _terminal_hxt_coord(
+    ca_coord: np.ndarray,
+    c_coord: np.ndarray,
+    o_coord: np.ndarray,
+    oxt_coord: np.ndarray,
+) -> np.ndarray:
+    return _place_internal_coordinate_atom(
+        atom_1=o_coord,
+        atom_2=c_coord,
+        atom_3=oxt_coord,
+        bond_length=OXT_HXT_BOND_LENGTH,
+        bond_angle_degrees=C_OXT_HXT_ANGLE_DEGREES,
+        dihedral_degrees=180.0,
+    )
 
 
 def _backbone_atoms(atom_array: struc.AtomArray) -> struc.AtomArray:

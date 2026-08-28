@@ -9,8 +9,10 @@ from swacanatase.secondary_structure import (
     CA_C_N_ANGLE_DEGREES,
     C_N_BOND_LENGTH,
     C_N_CA_ANGLE_DEGREES,
+    N_H_BOND_LENGTH,
     N_CA_BOND_LENGTH,
     N_CA_C_ANGLE_DEGREES,
+    OXT_HXT_BOND_LENGTH,
     SECONDARY_STRUCTURE_TARGETS,
     build_regular_secondary_structure_segment,
     measure_secondary_structure_orientation,
@@ -109,6 +111,40 @@ def test_bp5_residue_frame_remains_fixed_after_segment_growth() -> None:
     assert "OXT" not in bp5_residue.atom_name.tolist()
     assert "HXT" not in bp5_residue.atom_name.tolist()
     assert "H2" not in bp5_residue.atom_name.tolist()
+
+
+def test_generated_peptide_terminals_are_normalized() -> None:
+    segment = build_regular_secondary_structure_segment(
+        _first_bp5_rotamer(),
+        secondary_structure_type="alpha_helix",
+        residues_before=1,
+        residues_after=1,
+    )
+
+    n_terminal_residue = _residue(segment.atom_array, 1)
+    bp5_residue = _residue(segment.atom_array, segment.bp5_residue_id)
+    c_terminal_residue = _residue(segment.atom_array, 3)
+
+    assert {"H", "H2"}.issubset(n_terminal_residue.atom_name.tolist())
+    assert "OXT" not in n_terminal_residue.atom_name.tolist()
+    assert "H" in bp5_residue.atom_name.tolist()
+    assert "H2" not in bp5_residue.atom_name.tolist()
+    assert "OXT" not in bp5_residue.atom_name.tolist()
+    assert "HXT" not in bp5_residue.atom_name.tolist()
+    assert "H" in c_terminal_residue.atom_name.tolist()
+    assert {"OXT", "HXT"}.issubset(c_terminal_residue.atom_name.tolist())
+
+    assert np.isclose(
+        _distance(n_terminal_residue, "N", n_terminal_residue, "H"),
+        N_H_BOND_LENGTH,
+    )
+    assert np.isclose(
+        _distance(c_terminal_residue, "OXT", c_terminal_residue, "HXT"),
+        OXT_HXT_BOND_LENGTH,
+    )
+    assert segment.atom_array.atom_id.tolist() == list(
+        range(1, segment.atom_array.array_length() + 1)
+    )
 
 
 def test_neighboring_secondary_structure_backbone_clashes_are_scored() -> None:
