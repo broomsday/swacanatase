@@ -242,6 +242,11 @@ Initial deterministic backbone targets:
 | alpha helix | `-60` | `-45` |
 | beta strand | `-135` | `135` |
 
+Missing follow-up feature: secondary-structure growth currently uses one ideal
+`phi`/`psi` target pair per type. Add explicit `phi`/`psi` sampling later, either
+as named grids such as `ideal`/`coarse` or as direct CLI values, and persist the
+selected `phi`/`psi` values in the secondary-structure score report.
+
 For internal protein segments, replace terminal-only BP5 atoms as needed:
 
 - [x] drop `OXT` and `HXT` when BP5 is embedded in a chain
