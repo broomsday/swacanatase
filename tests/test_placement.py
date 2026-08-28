@@ -223,9 +223,14 @@ def test_write_bp5_nanoring_series_can_write_score_reports(tmp_path: Path) -> No
     assert len(secondary_rows) == 9
     assert {row["accepted"] for row in rotamer_rows} == {"False", "True"}
     assert {row["accepted"] for row in secondary_rows} == {"True"}
+    assert {row["cylinder_intrusion_count"] for row in secondary_rows} == {"0"}
+    assert {row["cylinder_max_intrusion_depth"] for row in secondary_rows} == {"0.0"}
     assert metadata["available_rotamer_states"] == 6
     assert metadata["summaries"][0]["rotamer_states_scanned"] == 6
     assert metadata["summaries"][0]["secondary_structure_states_scanned"] == 1
+    assert metadata["secondary_structure_cylinder_filter"] is True
+    assert metadata["secondary_structure_cylinder_radius"] is None
+    assert metadata["secondary_structure_cylinder_radius_unit"] == "Angstrom"
 
 
 def test_write_bp5_nanoring_series_can_limit_deterministic_scan_size(
@@ -295,6 +300,8 @@ def test_write_bp5_nanoring_series_defaults_to_three_residue_segment_context(
         metadata["secondary_structure_clash_cutoff_unit"]
         == "total_overlap_per_bp5_site"
     )
+    assert metadata["secondary_structure_cylinder_filter"] is True
+    assert metadata["secondary_structure_cylinder_radius"] is None
 
 
 def test_placement_cli_exposes_rotamer_and_secondary_structure_output_modes(
@@ -319,6 +326,7 @@ def test_placement_cli_exposes_rotamer_and_secondary_structure_output_modes(
             "1",
             "--residues-after",
             "0",
+            "--allow-secondary-structure-cylinder-intrusions",
         ]
     )
 

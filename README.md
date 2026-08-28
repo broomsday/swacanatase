@@ -135,9 +135,16 @@ than `2.2` Angstrom and Pd-involving pairs closer than `1.8` Angstrom contribute
 `cutoff - distance`. The placement score ignores intra-residue pairs, virtual
 `CV1`/`CV2` atoms, Pd contacts to the two intended scaffold anchor carbons, and
 inter-residue backbone `N`/`C` pairs. Reports include both total and per-site
-scores. Override with `--rotamer-clash-cutoff` or
-`--secondary-structure-clash-cutoff`; use `--no-clash-cutoffs` for fully
-unfiltered exploratory output.
+scores.
+
+Secondary-structure states are also rejected by default if any atom center lies
+inside the finite cylinder wrapped by the nanoring. The default cylinder uses
+the scaffold z extent and the innermost nanoring carbon radial distance.
+Override the radius with `--secondary-structure-cylinder-radius`; use
+`--allow-secondary-structure-cylinder-intrusions` for exploratory output that
+keeps states entering this interior volume. Override overlap cutoffs with
+`--rotamer-clash-cutoff` or `--secondary-structure-clash-cutoff`; use
+`--no-clash-cutoffs` to disable the overlap cutoffs.
 
 Report outputs:
 

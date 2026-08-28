@@ -215,6 +215,7 @@ def test_nanoring_rotamer_ensemble_scores_secondary_structure_candidates() -> No
     assert len(placement.accepted_secondary_structure_candidates) == 9
     secondary_state = placement.secondary_structure_states[0]
     assert len(secondary_state.candidates) == 9
+    assert secondary_state.cylinder_intrusion_score.passes
     assert secondary_state.segments.array_length() == sum(
         candidate.segment.atom_array.array_length()
         for candidate in secondary_state.candidates
@@ -235,6 +236,7 @@ def test_nanoring_rotamer_ensemble_scores_secondary_structure_candidates() -> No
         assert candidate.scaffold_clash_score >= 0.0
         assert candidate.bp5_clash_score >= 0.0
         assert candidate.neighboring_backbone_clash_score >= 0.0
+        assert candidate.cylinder_intrusion_score.passes
         assert np.isclose(candidate.clash_score, secondary_state.clash_score)
         assert np.isclose(
             candidate.clash_score,
@@ -274,11 +276,32 @@ def test_default_secondary_structure_clash_cutoff_filters_high_overlap_states() 
     }
 
     assert len(placement.secondary_structure_states) == 6
-    assert accepted_names == {"gminus_p90", "gplus_m90", "gplus_p90", "trans_m90"}
+    assert accepted_names == {"gminus_p90", "gplus_m90", "trans_m90"}
     assert all(
         state.clash_score / len(state.candidates) <= 6.0
         for state in placement.accepted_secondary_structure_states
     )
+    assert all(
+        state.cylinder_intrusion_score.passes
+        for state in placement.accepted_secondary_structure_states
+    )
+
+
+def test_secondary_structure_cylinder_filter_can_be_disabled() -> None:
+    placement = place_bp5_rotamer_ensembles_around_nanoring(
+        m=18,
+        cif_path=Path("data/rcsb/BP5.cif"),
+        secondary_structure="alpha_helix",
+        secondary_structure_cylinder_filter=False,
+    )
+
+    accepted_by_name = {
+        state.rotamer_name: state
+        for state in placement.accepted_secondary_structure_states
+    }
+
+    assert "gplus_p90" in accepted_by_name
+    assert not accepted_by_name["gplus_p90"].cylinder_intrusion_score.passes
 
 
 def test_secondary_structure_candidates_keep_symmetric_rotamer_states() -> None:

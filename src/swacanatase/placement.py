@@ -26,12 +26,14 @@ from .clashes import score_heavy_atom_clashes
 from .ligands import DEFAULT_LIGAND_DIR, load_bp5_bond_pairs
 from .nanoring import generate_armchair_nanoring
 from .secondary_structure import (
+    NanoringCylinderIntrusionScore,
     SecondaryStructureClashScore,
     SecondaryStructureOrientationMetrics,
     SecondaryStructureType,
     SecondaryStructureSegment,
     build_regular_secondary_structure_segment,
     measure_secondary_structure_orientation,
+    score_nanoring_cylinder_intrusions,
 )
 
 DEFAULT_M_VALUES = (18, 24, 30, 36)
@@ -86,6 +88,14 @@ SECONDARY_STRUCTURE_REPORT_FIELDS = (
     "state_scan_index",
     "state_score_rank",
     "accepted",
+    "cylinder_intrusion_count",
+    "cylinder_intrusion_count_per_site",
+    "cylinder_total_intrusion_depth",
+    "cylinder_total_intrusion_depth_per_site",
+    "cylinder_max_intrusion_depth",
+    "cylinder_radius",
+    "cylinder_z_min",
+    "cylinder_z_max",
     "secondary_clash_score",
     "secondary_clash_score_per_site",
     "scaffold_clash_score",
@@ -146,6 +156,7 @@ class BP5SecondaryStructurePlacement:
     bp5_clash_score: float
     neighboring_backbone_clash_score: float
     clash_score: float
+    cylinder_intrusion_score: NanoringCylinderIntrusionScore
 
     @property
     def secondary_structure_direction(self) -> np.ndarray:
@@ -171,6 +182,18 @@ class BP5SecondaryStructurePlacement:
     def c_terminal_exit_vector(self) -> np.ndarray:
         return self.orientation_metrics.c_terminal_exit_vector
 
+    @property
+    def cylinder_intrusion_count(self) -> int:
+        return self.cylinder_intrusion_score.intruding_atom_count
+
+    @property
+    def cylinder_total_intrusion_depth(self) -> float:
+        return self.cylinder_intrusion_score.total_intrusion_depth
+
+    @property
+    def cylinder_max_intrusion_depth(self) -> float:
+        return self.cylinder_intrusion_score.max_intrusion_depth
+
 
 @dataclass(frozen=True)
 class BP5SymmetricRotamerState:
@@ -195,6 +218,7 @@ class BP5SymmetricSecondaryStructureState:
     bp5_clash_score: float
     neighboring_backbone_clash_score: float
     clash_score: float
+    cylinder_intrusion_score: NanoringCylinderIntrusionScore
 
     @property
     def segments(self) -> struc.AtomArray:
@@ -437,6 +461,8 @@ def place_bp5_rotamer_ensembles_around_nanoring(
     secondary_structure_clash_cutoff: float | None = (
         DEFAULT_SECONDARY_STRUCTURE_CLASH_CUTOFF_PER_SITE
     ),
+    secondary_structure_cylinder_filter: bool = True,
+    secondary_structure_cylinder_radius: float | None = None,
 ) -> BP5NanoringRotamerPlacement:
     """Place BP5/Pd sidechains and enumerate fixed-active-site chi rotamers."""
     _validate_positive_limit(rotamer_scan_limit, "rotamer_scan_limit")
@@ -448,6 +474,11 @@ def place_bp5_rotamer_ensembles_around_nanoring(
     )
     if residues_before < 0 or residues_after < 0:
         raise ValueError("residue counts must be non-negative")
+    if (
+        secondary_structure_cylinder_radius is not None
+        and secondary_structure_cylinder_radius <= 0.0
+    ):
+        raise ValueError("secondary_structure_cylinder_radius must be positive")
     if secondary_structure not in {None, "alpha_helix", "beta_strand"}:
         raise ValueError(
             "secondary_structure must be None, 'alpha_helix', or 'beta_strand'"
@@ -513,10 +544,12 @@ def place_bp5_rotamer_ensembles_around_nanoring(
             residues_before=residues_before,
             residues_after=residues_after,
             starting_atom_id=rigid_placement.nanoring.array_length() + 1,
+            cylinder_radius=secondary_structure_cylinder_radius,
         )
         accepted_secondary_states = _select_symmetric_secondary_states(
             states=secondary_states,
             clash_cutoff=secondary_structure_clash_cutoff,
+            cylinder_filter=secondary_structure_cylinder_filter,
         )
         secondary_candidates = _flatten_secondary_structure_states(secondary_states)
         accepted_secondary_candidates = _flatten_secondary_structure_states(
@@ -559,6 +592,8 @@ def write_bp5_nanoring_series(
     secondary_structure_clash_cutoff: float | None = (
         DEFAULT_SECONDARY_STRUCTURE_CLASH_CUTOFF_PER_SITE
     ),
+    secondary_structure_cylinder_filter: bool = True,
+    secondary_structure_cylinder_radius: float | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> list[Path]:
     """Write nanoring-only and BP5-placed structures for each requested M value."""
@@ -571,6 +606,11 @@ def write_bp5_nanoring_series(
     )
     if residues_before < 0 or residues_after < 0:
         raise ValueError("residue counts must be non-negative")
+    if (
+        secondary_structure_cylinder_radius is not None
+        and secondary_structure_cylinder_radius <= 0.0
+    ):
+        raise ValueError("secondary_structure_cylinder_radius must be positive")
     if secondary_structure not in {None, "alpha_helix", "beta_strand"}:
         raise ValueError(
             "secondary_structure must be None, 'alpha_helix', or 'beta_strand'"
@@ -668,6 +708,8 @@ def write_bp5_nanoring_series(
             residues_before=residues_before,
             residues_after=residues_after,
             secondary_structure_clash_cutoff=secondary_structure_clash_cutoff,
+            secondary_structure_cylinder_filter=secondary_structure_cylinder_filter,
+            secondary_structure_cylinder_radius=secondary_structure_cylinder_radius,
         )
         _emit_progress(
             progress,
@@ -804,6 +846,13 @@ def write_bp5_nanoring_series(
                 "secondary_structure_clash_cutoff_unit": (
                     "total_overlap_per_bp5_site"
                 ),
+                "secondary_structure_cylinder_filter": (
+                    secondary_structure_cylinder_filter
+                ),
+                "secondary_structure_cylinder_radius": (
+                    secondary_structure_cylinder_radius
+                ),
+                "secondary_structure_cylinder_radius_unit": "Angstrom",
                 "available_rotamer_states": len(DEFAULT_BP5_CHI_ROTAMERS),
                 "summaries": run_summaries,
             },
@@ -918,6 +967,26 @@ def _secondary_structure_report_rows(
                         candidate.rotamer_candidate.rotamer.name
                     ],
                     "accepted": candidate.rotamer_candidate.rotamer.name in accepted_names,
+                    "cylinder_intrusion_count": (
+                        state.cylinder_intrusion_score.intruding_atom_count
+                    ),
+                    "cylinder_intrusion_count_per_site": (
+                        state.cylinder_intrusion_score.intruding_atom_count
+                        / len(state.candidates)
+                    ),
+                    "cylinder_total_intrusion_depth": (
+                        state.cylinder_intrusion_score.total_intrusion_depth
+                    ),
+                    "cylinder_total_intrusion_depth_per_site": (
+                        state.cylinder_intrusion_score.total_intrusion_depth
+                        / len(state.candidates)
+                    ),
+                    "cylinder_max_intrusion_depth": (
+                        state.cylinder_intrusion_score.max_intrusion_depth
+                    ),
+                    "cylinder_radius": state.cylinder_intrusion_score.radius,
+                    "cylinder_z_min": state.cylinder_intrusion_score.z_min,
+                    "cylinder_z_max": state.cylinder_intrusion_score.z_max,
                     "secondary_clash_score": state.clash_score,
                     "secondary_clash_score_per_site": (
                         _state_clash_score_per_site(state)
@@ -1019,6 +1088,12 @@ class _BP5StateClashScore:
         return float(self.scaffold_score + self.bp5_score)
 
 
+@dataclass(frozen=True)
+class _SymmetricSecondaryStructureScore:
+    clash_score: SecondaryStructureClashScore
+    cylinder_intrusion_score: NanoringCylinderIntrusionScore
+
+
 def _build_symmetric_rotamer_states(
     candidates: tuple[BP5RotamerPlacement, ...],
     nanoring: struc.AtomArray,
@@ -1113,12 +1188,19 @@ def _rotamer_state_score_key(
 def _select_symmetric_secondary_states(
     states: tuple[BP5SymmetricSecondaryStructureState, ...],
     clash_cutoff: float | None,
+    cylinder_filter: bool,
 ) -> tuple[BP5SymmetricSecondaryStructureState, ...]:
     accepted_groups = [
         state
         for state in states
         if clash_cutoff is None or _state_clash_score_per_site(state) <= clash_cutoff
     ]
+    if cylinder_filter:
+        accepted_groups = [
+            state
+            for state in accepted_groups
+            if state.cylinder_intrusion_score.passes
+        ]
     return tuple(sorted(accepted_groups, key=_secondary_state_score_key))
 
 
@@ -1161,6 +1243,7 @@ def _build_symmetric_secondary_structure_states(
     residues_before: int,
     residues_after: int,
     starting_atom_id: int,
+    cylinder_radius: float | None,
 ) -> tuple[BP5SymmetricSecondaryStructureState, ...]:
     segment_span = residues_before + 1 + residues_after
     states: list[BP5SymmetricSecondaryStructureState] = []
@@ -1186,6 +1269,7 @@ def _build_symmetric_secondary_structure_states(
             segment_pairs=symmetric_segment_pairs,
             nanoring=nanoring,
             anchor_pairs=anchor_pairs,
+            cylinder_radius=cylinder_radius,
         )
         scored_candidates: list[BP5SecondaryStructurePlacement] = []
         for candidate, segment in symmetric_segment_pairs:
@@ -1196,25 +1280,36 @@ def _build_symmetric_secondary_structure_states(
                 tangential_direction=anchor_pair.tangential_direction,
                 ring_axis=anchor_pair.ring_axis,
             )
+            cylinder_intrusion_score = score_nanoring_cylinder_intrusions(
+                atom_array=segment.atom_array,
+                nanoring=nanoring,
+                cylinder_radius=cylinder_radius,
+            )
             scored_candidates.append(
                 BP5SecondaryStructurePlacement(
                     rotamer_candidate=candidate,
                     segment=segment,
                     orientation_metrics=orientation_metrics,
-                    scaffold_clash_score=score.scaffold_score,
-                    bp5_clash_score=score.bp5_score,
-                    neighboring_backbone_clash_score=score.neighboring_backbone_score,
-                    clash_score=score.total_overlap_score,
+                    scaffold_clash_score=score.clash_score.scaffold_score,
+                    bp5_clash_score=score.clash_score.bp5_score,
+                    neighboring_backbone_clash_score=(
+                        score.clash_score.neighboring_backbone_score
+                    ),
+                    clash_score=score.clash_score.total_overlap_score,
+                    cylinder_intrusion_score=cylinder_intrusion_score,
                 )
             )
         states.append(
             BP5SymmetricSecondaryStructureState(
                 rotamer_name=rotamer_state.rotamer_name,
                 candidates=tuple(scored_candidates),
-                scaffold_clash_score=score.scaffold_score,
-                bp5_clash_score=score.bp5_score,
-                neighboring_backbone_clash_score=score.neighboring_backbone_score,
-                clash_score=score.total_overlap_score,
+                scaffold_clash_score=score.clash_score.scaffold_score,
+                bp5_clash_score=score.clash_score.bp5_score,
+                neighboring_backbone_clash_score=(
+                    score.clash_score.neighboring_backbone_score
+                ),
+                clash_score=score.clash_score.total_overlap_score,
+                cylinder_intrusion_score=score.cylinder_intrusion_score,
             ),
         )
     return tuple(states)
@@ -1245,7 +1340,8 @@ def _score_symmetric_secondary_structure_state(
     segment_pairs: tuple[tuple[BP5RotamerPlacement, SecondaryStructureSegment], ...],
     nanoring: struc.AtomArray,
     anchor_pairs: tuple[NanoringAnchorPair, ...],
-) -> SecondaryStructureClashScore:
+    cylinder_radius: float | None,
+) -> _SymmetricSecondaryStructureScore:
     segments = tuple(segment for _, segment in segment_pairs)
     bp5_arrays = tuple(_bp5_segment_atoms(segment) for segment in segments)
     generated_arrays = tuple(_generated_segment_atoms(segment) for segment in segments)
@@ -1291,7 +1387,7 @@ def _score_symmetric_secondary_structure_state(
                 ignore_inter_residue_backbone_n_c=True,
             ).total_overlap_score
 
-    return SecondaryStructureClashScore(
+    clash_score = SecondaryStructureClashScore(
         scaffold_score=scaffold_score,
         bp5_score=float(
             bp5_score.bp5_score
@@ -1299,6 +1395,15 @@ def _score_symmetric_secondary_structure_state(
             + neighboring_generated_bp5_score
         ),
         neighboring_backbone_score=_score_atom_array_pairs(generated_arrays),
+    )
+    cylinder_intrusion_score = score_nanoring_cylinder_intrusions(
+        atom_array=struc.concatenate([segment.atom_array for segment in segments]),
+        nanoring=nanoring,
+        cylinder_radius=cylinder_radius,
+    )
+    return _SymmetricSecondaryStructureScore(
+        clash_score=clash_score,
+        cylinder_intrusion_score=cylinder_intrusion_score,
     )
 
 
@@ -1627,9 +1732,26 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--secondary-structure-cylinder-radius",
+        type=float,
+        default=None,
+        help=(
+            "Cylinder radius for secondary-structure interior exclusion. "
+            "Defaults to the innermost nanoring carbon radial distance."
+        ),
+    )
+    parser.add_argument(
+        "--allow-secondary-structure-cylinder-intrusions",
+        action="store_true",
+        help=(
+            "Do not reject secondary-structure states whose atom centers enter "
+            "the nanoring interior cylinder."
+        ),
+    )
+    parser.add_argument(
         "--no-clash-cutoffs",
         action="store_true",
-        help="Disable default rotamer and secondary-structure clash filtering.",
+        help="Disable default rotamer and secondary-structure overlap cutoffs.",
     )
     parser.add_argument(
         "--secondary-structure",
@@ -1697,6 +1819,10 @@ def main(argv: list[str] | None = None) -> int:
         residues_before=args.residues_before,
         residues_after=args.residues_after,
         secondary_structure_clash_cutoff=secondary_structure_clash_cutoff,
+        secondary_structure_cylinder_filter=(
+            not args.allow_secondary_structure_cylinder_intrusions
+        ),
+        secondary_structure_cylinder_radius=args.secondary_structure_cylinder_radius,
         progress=lambda message: print(message, file=sys.stderr),
     )
     for path in written_paths:

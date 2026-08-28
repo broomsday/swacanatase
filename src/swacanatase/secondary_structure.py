@@ -68,6 +68,22 @@ class SecondaryStructureClashScore:
 
 
 @dataclass(frozen=True)
+class NanoringCylinderIntrusionScore:
+    """Atom-center intrusions into the finite inner cylinder of a nanoring."""
+
+    radius: float
+    z_min: float
+    z_max: float
+    intruding_atom_count: int
+    total_intrusion_depth: float
+    max_intrusion_depth: float
+
+    @property
+    def passes(self) -> bool:
+        return self.intruding_atom_count == 0
+
+
+@dataclass(frozen=True)
 class SecondaryStructureOrientationMetrics:
     secondary_structure_direction: np.ndarray
     radial_alignment: float
@@ -216,6 +232,65 @@ def score_secondary_structure_segment_clashes(
         scaffold_score=float(scaffold_score),
         bp5_score=float(bp5_score),
         neighboring_backbone_score=neighboring_backbone_score,
+    )
+
+
+def score_nanoring_cylinder_intrusions(
+    atom_array: struc.AtomArray,
+    nanoring: struc.AtomArray,
+    cylinder_radius: float | None = None,
+    tolerance: float = 1e-6,
+) -> NanoringCylinderIntrusionScore:
+    """Count atom centers inside the finite cylinder wrapped by a nanoring.
+
+    The current nanoring workflow keeps scaffolds aligned to global Z, so the
+    inferred cylinder uses the nanoring z extent and the innermost carbon radial
+    distance from the global Z axis.
+    """
+    if nanoring.array_length() == 0:
+        raise ValueError("nanoring must contain atoms")
+    if tolerance < 0:
+        raise ValueError("tolerance must be non-negative")
+    radius = (
+        _infer_nanoring_cylinder_radius(nanoring)
+        if cylinder_radius is None
+        else float(cylinder_radius)
+    )
+    if radius <= 0.0:
+        raise ValueError("cylinder_radius must be positive")
+
+    z_min = float(np.min(nanoring.coord[:, 2]))
+    z_max = float(np.max(nanoring.coord[:, 2]))
+    if z_max <= z_min:
+        raise ValueError("nanoring must span a non-zero z extent")
+
+    if atom_array.array_length() == 0:
+        return NanoringCylinderIntrusionScore(
+            radius=radius,
+            z_min=z_min,
+            z_max=z_max,
+            intruding_atom_count=0,
+            total_intrusion_depth=0.0,
+            max_intrusion_depth=0.0,
+        )
+
+    radial_distances = np.linalg.norm(atom_array.coord[:, :2], axis=1)
+    z_values = atom_array.coord[:, 2]
+    intrudes = (
+        (radial_distances < radius - tolerance)
+        & (z_values > z_min + tolerance)
+        & (z_values < z_max - tolerance)
+    )
+    intrusion_depths = radius - radial_distances[intrudes]
+    return NanoringCylinderIntrusionScore(
+        radius=radius,
+        z_min=z_min,
+        z_max=z_max,
+        intruding_atom_count=int(intrudes.sum()),
+        total_intrusion_depth=float(intrusion_depths.sum()),
+        max_intrusion_depth=(
+            float(intrusion_depths.max()) if intrusion_depths.size else 0.0
+        ),
     )
 
 
@@ -610,6 +685,14 @@ def _terminal_hxt_coord(
 
 def _backbone_atoms(atom_array: struc.AtomArray) -> struc.AtomArray:
     return atom_array[np.isin(atom_array.atom_name, list(BACKBONE_ATOM_NAMES))]
+
+
+def _infer_nanoring_cylinder_radius(nanoring: struc.AtomArray) -> float:
+    carbon_atoms = nanoring[np.char.upper(nanoring.element.astype("U2")) == "C"]
+    if carbon_atoms.array_length() == 0:
+        raise ValueError("nanoring must contain carbon atoms")
+    radial_distances = np.linalg.norm(carbon_atoms.coord[:, :2], axis=1)
+    return float(radial_distances.min())
 
 
 def _generated_backbone_atoms(segment: SecondaryStructureSegment) -> struc.AtomArray:

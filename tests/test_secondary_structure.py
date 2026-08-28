@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import biotite.structure as struc
 import numpy as np
 
 from swacanatase.bp5_rotamers import enumerate_bp5_chi_rotamers
@@ -16,6 +17,7 @@ from swacanatase.secondary_structure import (
     SECONDARY_STRUCTURE_TARGETS,
     build_regular_secondary_structure_segment,
     measure_secondary_structure_orientation,
+    score_nanoring_cylinder_intrusions,
     score_secondary_structure_segment_clashes,
 )
 
@@ -164,6 +166,41 @@ def test_neighboring_secondary_structure_backbone_clashes_are_scored() -> None:
     assert score.bp5_score == 0.0
     assert score.neighboring_backbone_score > 0.0
     assert score.total_overlap_score == score.neighboring_backbone_score
+    assert not score.passes
+
+
+def test_nanoring_cylinder_intrusion_score_counts_atoms_inside_finite_volume() -> None:
+    nanoring = struc.AtomArray(4)
+    nanoring.coord = np.array(
+        [
+            [5.0, 0.0, -1.0],
+            [0.0, 5.0, -1.0],
+            [5.0, 0.0, 1.0],
+            [0.0, 5.0, 1.0],
+        ],
+        dtype=float,
+    )
+    nanoring.element = np.array(["C", "C", "C", "C"], dtype="U2")
+    atoms = struc.AtomArray(5)
+    atoms.coord = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [4.0, 0.0, 0.0],
+            [5.0, 0.0, 0.0],
+            [0.0, 0.0, 2.0],
+            [6.0, 0.0, 0.0],
+        ],
+        dtype=float,
+    )
+
+    score = score_nanoring_cylinder_intrusions(atoms, nanoring)
+
+    assert score.radius == 5.0
+    assert score.z_min == -1.0
+    assert score.z_max == 1.0
+    assert score.intruding_atom_count == 2
+    assert score.total_intrusion_depth == 6.0
+    assert score.max_intrusion_depth == 5.0
     assert not score.passes
 
 

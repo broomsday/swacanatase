@@ -49,11 +49,13 @@ from .placement import (
 from .secondary_structure import (
     SECONDARY_STRUCTURE_TARGETS,
     BackboneTorsionTargets,
+    NanoringCylinderIntrusionScore,
     SecondaryStructureClashScore,
     SecondaryStructureOrientationMetrics,
     SecondaryStructureSegment,
     build_regular_secondary_structure_segment,
     measure_secondary_structure_orientation,
+    score_nanoring_cylinder_intrusions,
     score_secondary_structure_segment_clashes,
 )
 
@@ -76,6 +78,7 @@ __all__ = [
     "DEFAULT_SECONDARY_STRUCTURE_CLASH_CUTOFF_PER_SITE",
     "DEFAULT_SECONDARY_STRUCTURE_OUTPUT_DIR",
     "DEFAULT_THEOZYME_OUTPUT_DIR",
+    "NanoringCylinderIntrusionScore",
     "NanoringAnchorPair",
     "RCSBLigandPaths",
     "SECONDARY_STRUCTURE_TARGETS",
@@ -104,6 +107,7 @@ __all__ = [
     "measure_secondary_structure_orientation",
     "place_bp5_rotamer_ensembles_around_nanoring",
     "place_bp5_sidechains_around_nanoring",
+    "score_nanoring_cylinder_intrusions",
     "score_secondary_structure_segment_clashes",
     "write_bp5_nanoring_series",
     "write_armchair_nanoring",
