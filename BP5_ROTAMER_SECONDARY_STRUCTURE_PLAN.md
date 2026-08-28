@@ -22,6 +22,10 @@ BP5 active-site group, not relax or re-place the nanoring-bound pharmacophore.
 
 ## BP5 Atom Mapping
 
+Status: Complete for the first implementation pass, including `C11` branch
+validation as a measured partner torsion rather than an independent degree of
+freedom.
+
 The local RCSB CCD BP5 atom names map cleanly onto a PHE-like sidechain for the
 first two chi angles:
 

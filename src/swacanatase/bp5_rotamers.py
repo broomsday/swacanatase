@@ -11,6 +11,7 @@ from .torsions import measure_dihedral, set_dihedral_by_rotating_component
 
 BP5_CHI1_ATOMS = ("N", "CA", "C12", "C9")
 BP5_CHI2_ATOMS = ("CA", "C12", "C9", "C8")
+BP5_CHI2_VALIDATION_ATOMS = ("CA", "C12", "C9", "C11")
 BP5_INTER_RING_TORSION_ATOMS = ("N1", "C3", "C6", "N2")
 BP5_BIPYRIDINE_RING_ATOMS = (
     "N1",
@@ -43,6 +44,7 @@ class BP5RotamerPlacement:
     atom_array: struc.AtomArray
     chi1_degrees: float
     chi2_degrees: float
+    chi2_validation_degrees: float
     clash_score: float
 
 
@@ -88,6 +90,10 @@ def enumerate_bp5_chi_rotamers(
                 atom_array=placed,
                 chi1_degrees=measure_dihedral(placed, BP5_CHI1_ATOMS),
                 chi2_degrees=measure_dihedral(placed, BP5_CHI2_ATOMS),
+                chi2_validation_degrees=measure_dihedral(
+                    placed,
+                    BP5_CHI2_VALIDATION_ATOMS,
+                ),
                 clash_score=clash_score,
             )
         )

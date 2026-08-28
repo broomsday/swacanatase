@@ -3,9 +3,12 @@ from pathlib import Path
 import numpy as np
 
 from swacanatase.bp5_rotamers import (
+    BP5_CHI2_ATOMS,
+    BP5_CHI2_VALIDATION_ATOMS,
     DEFAULT_BP5_CHI_ROTAMERS,
     enumerate_bp5_chi_rotamers,
 )
+from swacanatase.torsions import measure_dihedral
 from swacanatase.ligands import load_bp5_bond_pairs
 from swacanatase.placement import (
     place_bp5_rotamer_ensembles_around_nanoring,
@@ -57,6 +60,38 @@ def test_enumerating_rotamers_preserves_anchor_fit_and_realizes_chi_targets() ->
         assert candidate.atom_array.chain_id.tolist() == residue.chain_id.tolist()
         assert candidate.atom_array.res_id.tolist() == residue.res_id.tolist()
         assert candidate.atom_array.atom_id.tolist() == residue.atom_id.tolist()
+
+
+def test_chi2_c11_branch_torsion_is_retained_as_validation_partner() -> None:
+    placement = place_bp5_sidechains_around_nanoring(
+        m=18,
+        cif_path=Path("data/rcsb/BP5.cif"),
+    )
+    residue = placement.sidechains[placement.sidechains.res_id == 1]
+    rotamers = enumerate_bp5_chi_rotamers(residue, residue_id=1)
+    expected_validation_offset = _signed_angle_delta(
+        measure_dihedral(residue, BP5_CHI2_VALIDATION_ATOMS),
+        measure_dihedral(residue, BP5_CHI2_ATOMS),
+    )
+
+    validation_offsets = {
+        round(
+            _signed_angle_delta(
+                candidate.chi2_validation_degrees,
+                candidate.chi2_degrees,
+            ),
+            6,
+        )
+        for candidate in rotamers
+    }
+
+    assert len(validation_offsets) == 1
+    assert np.isclose(next(iter(validation_offsets)), expected_validation_offset)
+    for candidate in rotamers:
+        assert np.isclose(
+            candidate.chi2_validation_degrees,
+            measure_dihedral(candidate.atom_array, BP5_CHI2_VALIDATION_ATOMS),
+        )
 
 
 def test_nanoring_rotamer_ensemble_produces_six_raw_candidates_per_site() -> None:
@@ -148,6 +183,10 @@ def _coords_by_name(atom_array, atom_names: tuple[str, ...]) -> tuple[tuple[floa
 
 def _angle_close(actual: float, expected: float, atol: float = 1e-4) -> bool:
     return abs((actual - expected + 180.0) % 360.0 - 180.0) <= atol
+
+
+def _signed_angle_delta(target: float, current: float) -> float:
+    return float((target - current + 180.0) % 360.0 - 180.0)
 
 
 def _atom_index(atom_array, atom_name: str) -> int:
