@@ -14,11 +14,18 @@ from swacanatase.secondary_structure import (
     N_CA_BOND_LENGTH,
     N_CA_C_ANGLE_DEGREES,
     OXT_HXT_BOND_LENGTH,
+    RAMACHANDRAN_ALLOWED,
+    RAMACHANDRAN_DISALLOWED,
+    RAMACHANDRAN_FAVORED,
     SECONDARY_STRUCTURE_TARGETS,
+    BackboneTorsionTargets,
     build_regular_secondary_structure_segment,
     measure_secondary_structure_orientation,
+    phi_psi_grid_values,
     score_nanoring_cylinder_intrusions,
     score_secondary_structure_segment_clashes,
+    secondary_structure_phi_psi_scan_matrix,
+    secondary_structure_phi_psi_scan_targets,
 )
 
 
@@ -95,6 +102,73 @@ def test_generated_backbone_geometry_matches_regular_secondary_structure_targets
                 _dihedral(residue, "N", residue, "CA", residue, "C", next_residue, "N"),
                 targets.psi_degrees,
             )
+
+
+def test_phi_psi_scan_matrix_is_sparse_on_a_5_degree_grid() -> None:
+    matrix = secondary_structure_phi_psi_scan_matrix(
+        "alpha_helix",
+        step_degrees=5.0,
+    )
+    grid_values = phi_psi_grid_values(step_degrees=5.0)
+    phi_index = grid_values.tolist().index(-60.0)
+    psi_index = grid_values.tolist().index(-45.0)
+
+    assert matrix.shape == (72, 72)
+    assert matrix[phi_index, psi_index] == RAMACHANDRAN_FAVORED
+    assert matrix[0, 0] == RAMACHANDRAN_DISALLOWED
+    assert np.count_nonzero(matrix == RAMACHANDRAN_ALLOWED) > 0
+    assert np.count_nonzero(matrix) < matrix.size / 5
+
+
+def test_phi_psi_scan_targets_are_ordered_from_ideal_center_outward() -> None:
+    targets = secondary_structure_phi_psi_scan_targets(
+        "beta_strand",
+        step_degrees=5.0,
+        ramachandran_level="favored",
+    )
+
+    assert targets[0] == BackboneTorsionTargets(
+        phi_degrees=-135.0,
+        psi_degrees=135.0,
+        label="phi_m135_psi_p135",
+        ramachandran_level="favored",
+    )
+    assert 1 < len(targets) < 72 * 72
+    assert all(target.ramachandran_level == "favored" for target in targets)
+    assert all(target.phi_degrees % 5.0 == 0.0 for target in targets)
+    assert all(target.psi_degrees % 5.0 == 0.0 for target in targets)
+
+
+def test_custom_phi_psi_targets_drive_secondary_structure_growth() -> None:
+    bp5_rotamer = _first_bp5_rotamer()
+    target = BackboneTorsionTargets(
+        phi_degrees=-65.0,
+        psi_degrees=-40.0,
+        label="phi_m065_psi_m040",
+        ramachandran_level="favored",
+    )
+
+    segment = build_regular_secondary_structure_segment(
+        bp5_rotamer,
+        secondary_structure_type="alpha_helix",
+        residues_before=2,
+        residues_after=2,
+        torsion_targets=target,
+    )
+
+    assert segment.torsion_targets == target
+    for residue_id in range(2, 5):
+        residue = _residue(segment.atom_array, residue_id)
+        previous_residue = _residue(segment.atom_array, residue_id - 1)
+        next_residue = _residue(segment.atom_array, residue_id + 1)
+        assert _angle_close(
+            _dihedral(previous_residue, "C", residue, "N", residue, "CA", residue, "C"),
+            target.phi_degrees,
+        )
+        assert _angle_close(
+            _dihedral(residue, "N", residue, "CA", residue, "C", next_residue, "N"),
+            target.psi_degrees,
+        )
 
 
 def test_bp5_residue_frame_remains_fixed_after_segment_growth() -> None:

@@ -26,14 +26,18 @@ from .clashes import score_heavy_atom_clashes
 from .ligands import DEFAULT_LIGAND_DIR, load_bp5_bond_pairs
 from .nanoring import generate_armchair_nanoring
 from .secondary_structure import (
+    BackboneTorsionTargets,
     NanoringCylinderIntrusionScore,
+    RamachandranLevel,
     SecondaryStructureClashScore,
     SecondaryStructureOrientationMetrics,
     SecondaryStructureType,
     SecondaryStructureSegment,
+    SECONDARY_STRUCTURE_TARGETS,
     build_regular_secondary_structure_segment,
     measure_secondary_structure_orientation,
     score_nanoring_cylinder_intrusions,
+    secondary_structure_phi_psi_scan_targets,
 )
 
 DEFAULT_M_VALUES = (18, 24, 30, 36)
@@ -80,6 +84,10 @@ SECONDARY_STRUCTURE_REPORT_FIELDS = (
     "anchor_phase_offset",
     "snap_virtual_carbons",
     "secondary_structure",
+    "phi_degrees",
+    "psi_degrees",
+    "phi_psi_label",
+    "ramachandran_level",
     "residues_before",
     "residues_after",
     "residue_id",
@@ -213,6 +221,7 @@ class BP5SymmetricSecondaryStructureState:
     """One symmetric secondary-structure state represented at every anchor."""
 
     rotamer_name: str
+    torsion_targets: BackboneTorsionTargets
     candidates: tuple[BP5SecondaryStructurePlacement, ...]
     scaffold_clash_score: float
     bp5_clash_score: float
@@ -456,6 +465,8 @@ def place_bp5_rotamer_ensembles_around_nanoring(
     rotamer_clash_cutoff: float | None = DEFAULT_ROTAMER_CLASH_CUTOFF_PER_SITE,
     secondary_structure: SecondaryStructureType | None = None,
     secondary_structure_scan_limit: int | None = None,
+    secondary_structure_phi_psi_step_degrees: float | None = None,
+    secondary_structure_ramachandran_level: RamachandranLevel = "favored",
     residues_before: int = DEFAULT_SECONDARY_STRUCTURE_RESIDUES_BEFORE,
     residues_after: int = DEFAULT_SECONDARY_STRUCTURE_RESIDUES_AFTER,
     secondary_structure_clash_cutoff: float | None = (
@@ -482,6 +493,10 @@ def place_bp5_rotamer_ensembles_around_nanoring(
     if secondary_structure not in {None, "alpha_helix", "beta_strand"}:
         raise ValueError(
             "secondary_structure must be None, 'alpha_helix', or 'beta_strand'"
+        )
+    if secondary_structure_ramachandran_level not in {"favored", "allowed"}:
+        raise ValueError(
+            "secondary_structure_ramachandran_level must be 'favored' or 'allowed'"
         )
 
     rigid_placement = place_bp5_sidechains_around_nanoring(
@@ -532,12 +547,20 @@ def place_bp5_rotamer_ensembles_around_nanoring(
     secondary_states: tuple[BP5SymmetricSecondaryStructureState, ...] = ()
     accepted_secondary_states: tuple[BP5SymmetricSecondaryStructureState, ...] = ()
     if secondary_structure is not None:
-        rotamer_states_for_secondary_structure = _limit_tuple(
-            accepted_rotamer_states,
+        torsion_targets = _secondary_structure_torsion_targets(
+            secondary_structure=secondary_structure,
+            phi_psi_step_degrees=secondary_structure_phi_psi_step_degrees,
+            ramachandran_level=secondary_structure_ramachandran_level,
+        )
+        secondary_structure_scan_inputs = _limit_tuple(
+            _secondary_structure_scan_inputs(
+                rotamer_states=accepted_rotamer_states,
+                torsion_targets=torsion_targets,
+            ),
             secondary_structure_scan_limit,
         )
         secondary_states = _build_symmetric_secondary_structure_states(
-            rotamer_states=rotamer_states_for_secondary_structure,
+            secondary_structure_scan_inputs=secondary_structure_scan_inputs,
             nanoring=rigid_placement.nanoring,
             anchor_pairs=rigid_placement.anchor_pairs,
             secondary_structure=secondary_structure,
@@ -587,6 +610,8 @@ def write_bp5_nanoring_series(
     rotamer_clash_cutoff: float | None = DEFAULT_ROTAMER_CLASH_CUTOFF_PER_SITE,
     secondary_structure: SecondaryStructureType | None = None,
     secondary_structure_scan_limit: int | None = None,
+    secondary_structure_phi_psi_step_degrees: float | None = None,
+    secondary_structure_ramachandran_level: RamachandranLevel = "favored",
     residues_before: int = DEFAULT_SECONDARY_STRUCTURE_RESIDUES_BEFORE,
     residues_after: int = DEFAULT_SECONDARY_STRUCTURE_RESIDUES_AFTER,
     secondary_structure_clash_cutoff: float | None = (
@@ -614,6 +639,10 @@ def write_bp5_nanoring_series(
     if secondary_structure not in {None, "alpha_helix", "beta_strand"}:
         raise ValueError(
             "secondary_structure must be None, 'alpha_helix', or 'beta_strand'"
+        )
+    if secondary_structure_ramachandran_level not in {"favored", "allowed"}:
+        raise ValueError(
+            "secondary_structure_ramachandran_level must be 'favored' or 'allowed'"
         )
 
     m_values = tuple(m_values)
@@ -705,6 +734,12 @@ def write_bp5_nanoring_series(
             rotamer_clash_cutoff=rotamer_clash_cutoff,
             secondary_structure=secondary_structure,
             secondary_structure_scan_limit=secondary_structure_scan_limit,
+            secondary_structure_phi_psi_step_degrees=(
+                secondary_structure_phi_psi_step_degrees
+            ),
+            secondary_structure_ramachandran_level=(
+                secondary_structure_ramachandran_level
+            ),
             residues_before=residues_before,
             residues_after=residues_after,
             secondary_structure_clash_cutoff=secondary_structure_clash_cutoff,
@@ -719,6 +754,22 @@ def write_bp5_nanoring_series(
                 f"{len(rotamer_placement.rotamer_states)} rotamer state(s)"
             ),
         )
+        if secondary_structure is not None:
+            secondary_structure_target_count = len(
+                _secondary_structure_torsion_targets(
+                    secondary_structure=secondary_structure,
+                    phi_psi_step_degrees=secondary_structure_phi_psi_step_degrees,
+                    ramachandran_level=secondary_structure_ramachandran_level,
+                )
+            )
+            _emit_progress(
+                progress,
+                (
+                    f"[{m_index}/{len(m_values)}] M={m}: scanning "
+                    f"{secondary_structure_target_count} phi/psi target(s) "
+                    f"per accepted rotamer state"
+                ),
+            )
         rotamer_output_paths: dict[str, Path] = {}
         if enumerate_bp5_rotamers:
             for state in rotamer_placement.accepted_rotamer_states:
@@ -740,11 +791,16 @@ def write_bp5_nanoring_series(
 
         secondary_structure_output_paths: dict[str, Path] = {}
         for state in rotamer_placement.accepted_secondary_structure_states:
+            state_key = _secondary_state_key(state)
             segment_path = (
                 secondary_structure_output_dir
-                / (
-                    f"nanoring_M{m}_{state.rotamer_name}_{secondary_structure}_"
-                    f"pre{residues_before}_post{residues_after}.{file_format}"
+                / _secondary_structure_output_filename(
+                    m=m,
+                    state=state,
+                    secondary_structure=secondary_structure,
+                    residues_before=residues_before,
+                    residues_after=residues_after,
+                    file_format=file_format,
                 )
             )
             written_paths.append(
@@ -757,7 +813,7 @@ def write_bp5_nanoring_series(
                     overwrite=overwrite,
                 )
             )
-            secondary_structure_output_paths[state.rotamer_name] = segment_path
+            secondary_structure_output_paths[state_key] = segment_path
         if secondary_structure is not None:
             _emit_progress(
                 progress,
@@ -840,6 +896,27 @@ def write_bp5_nanoring_series(
                 "rotamer_clash_cutoff_unit": "total_overlap_per_bp5_site",
                 "secondary_structure": secondary_structure,
                 "secondary_structure_scan_limit": secondary_structure_scan_limit,
+                "secondary_structure_phi_psi_step_degrees": (
+                    secondary_structure_phi_psi_step_degrees
+                ),
+                "secondary_structure_ramachandran_level": (
+                    secondary_structure_ramachandran_level
+                ),
+                "available_secondary_structure_targets": (
+                    len(
+                        _secondary_structure_torsion_targets(
+                            secondary_structure=secondary_structure,
+                            phi_psi_step_degrees=(
+                                secondary_structure_phi_psi_step_degrees
+                            ),
+                            ramachandran_level=(
+                                secondary_structure_ramachandran_level
+                            ),
+                        )
+                    )
+                    if secondary_structure is not None
+                    else 0
+                ),
                 "residues_before": residues_before,
                 "residues_after": residues_after,
                 "secondary_structure_clash_cutoff": secondary_structure_clash_cutoff,
@@ -915,6 +992,25 @@ def _rotamer_report_rows(
     return rows
 
 
+def _secondary_structure_output_filename(
+    m: int,
+    state: BP5SymmetricSecondaryStructureState,
+    secondary_structure: SecondaryStructureType | None,
+    residues_before: int,
+    residues_after: int,
+    file_format: str,
+) -> str:
+    target_suffix = (
+        ""
+        if state.torsion_targets.label == "ideal"
+        else f"_{state.torsion_targets.label}"
+    )
+    return (
+        f"nanoring_M{m}_{state.rotamer_name}_{secondary_structure}"
+        f"{target_suffix}_pre{residues_before}_post{residues_after}.{file_format}"
+    )
+
+
 def _secondary_structure_report_rows(
     placement: BP5NanoringRotamerPlacement,
     units: float | int,
@@ -928,15 +1024,16 @@ def _secondary_structure_report_rows(
     if secondary_structure is None:
         return []
 
-    accepted_names = {
-        state.rotamer_name for state in placement.accepted_secondary_structure_states
+    accepted_keys = {
+        _secondary_state_key(state)
+        for state in placement.accepted_secondary_structure_states
     }
     scan_index_by_name = {
-        state.rotamer_name: scan_index
+        _secondary_state_key(state): scan_index
         for scan_index, state in enumerate(placement.secondary_structure_states, start=1)
     }
     score_rank_by_name = {
-        state.rotamer_name: score_rank
+        _secondary_state_key(state): score_rank
         for score_rank, state in enumerate(
             sorted(placement.secondary_structure_states, key=_secondary_state_score_key),
             start=1,
@@ -944,6 +1041,7 @@ def _secondary_structure_report_rows(
     }
     rows: list[dict[str, object]] = []
     for state in placement.secondary_structure_states:
+        state_key = _secondary_state_key(state)
         for candidate in state.candidates:
             residue_id = candidate.rotamer_candidate.residue_id
             anchor_pair = placement.anchor_pairs[residue_id - 1]
@@ -955,18 +1053,18 @@ def _secondary_structure_report_rows(
                     "anchor_phase_offset": anchor_phase_offset,
                     "snap_virtual_carbons": snap_virtual_carbons,
                     "secondary_structure": secondary_structure,
+                    "phi_degrees": state.torsion_targets.phi_degrees,
+                    "psi_degrees": state.torsion_targets.psi_degrees,
+                    "phi_psi_label": state.torsion_targets.label,
+                    "ramachandran_level": state.torsion_targets.ramachandran_level,
                     "residues_before": residues_before,
                     "residues_after": residues_after,
                     "residue_id": residue_id,
                     "anchor_angle_degrees": anchor_pair.angular_midpoint_degrees,
                     "rotamer_name": candidate.rotamer_candidate.rotamer.name,
-                    "state_scan_index": scan_index_by_name[
-                        candidate.rotamer_candidate.rotamer.name
-                    ],
-                    "state_score_rank": score_rank_by_name[
-                        candidate.rotamer_candidate.rotamer.name
-                    ],
-                    "accepted": candidate.rotamer_candidate.rotamer.name in accepted_names,
+                    "state_scan_index": scan_index_by_name[state_key],
+                    "state_score_rank": score_rank_by_name[state_key],
+                    "accepted": state_key in accepted_keys,
                     "cylinder_intrusion_count": (
                         state.cylinder_intrusion_score.intruding_atom_count
                     ),
@@ -1022,7 +1120,7 @@ def _secondary_structure_report_rows(
                     "tangential_alignment": metrics.tangential_alignment,
                     "axial_alignment": metrics.axial_alignment,
                     "output_path": str(
-                        output_paths.get(candidate.rotamer_candidate.rotamer.name, "")
+                        output_paths.get(state_key, "")
                     ),
                 }
             )
@@ -1232,11 +1330,45 @@ def _flatten_secondary_structure_states(
 def _secondary_state_score_key(
     state: BP5SymmetricSecondaryStructureState,
 ) -> tuple[float, str]:
-    return (state.clash_score, state.rotamer_name)
+    return (state.clash_score, _secondary_state_key(state))
+
+
+def _secondary_structure_torsion_targets(
+    secondary_structure: SecondaryStructureType,
+    phi_psi_step_degrees: float | None,
+    ramachandran_level: RamachandranLevel,
+) -> tuple[BackboneTorsionTargets, ...]:
+    if phi_psi_step_degrees is None:
+        return (SECONDARY_STRUCTURE_TARGETS[secondary_structure],)
+    return secondary_structure_phi_psi_scan_targets(
+        secondary_structure_type=secondary_structure,
+        step_degrees=phi_psi_step_degrees,
+        ramachandran_level=ramachandran_level,
+    )
+
+
+def _secondary_structure_scan_inputs(
+    rotamer_states: tuple[BP5SymmetricRotamerState, ...],
+    torsion_targets: tuple[BackboneTorsionTargets, ...],
+) -> tuple[tuple[BP5SymmetricRotamerState, BackboneTorsionTargets], ...]:
+    return tuple(
+        (rotamer_state, target)
+        for rotamer_state in rotamer_states
+        for target in torsion_targets
+    )
+
+
+def _secondary_state_key(state: BP5SymmetricSecondaryStructureState) -> str:
+    if state.torsion_targets.label == "ideal":
+        return state.rotamer_name
+    return f"{state.rotamer_name}_{state.torsion_targets.label}"
 
 
 def _build_symmetric_secondary_structure_states(
-    rotamer_states: tuple[BP5SymmetricRotamerState, ...],
+    secondary_structure_scan_inputs: tuple[
+        tuple[BP5SymmetricRotamerState, BackboneTorsionTargets],
+        ...,
+    ],
     nanoring: struc.AtomArray,
     anchor_pairs: tuple[NanoringAnchorPair, ...],
     secondary_structure: SecondaryStructureType,
@@ -1247,7 +1379,7 @@ def _build_symmetric_secondary_structure_states(
 ) -> tuple[BP5SymmetricSecondaryStructureState, ...]:
     segment_span = residues_before + 1 + residues_after
     states: list[BP5SymmetricSecondaryStructureState] = []
-    for rotamer_state in rotamer_states:
+    for rotamer_state, torsion_targets in secondary_structure_scan_inputs:
         segment_pairs: list[tuple[BP5RotamerPlacement, SecondaryStructureSegment]] = []
         next_atom_id = starting_atom_id
         for candidate in rotamer_state.candidates:
@@ -1258,6 +1390,7 @@ def _build_symmetric_secondary_structure_states(
                 residues_after=residues_after,
                 starting_residue_id=1 + (candidate.residue_id - 1) * segment_span,
                 starting_atom_id=next_atom_id,
+                torsion_targets=torsion_targets,
             )
             next_atom_id += segment.atom_array.array_length()
             segment_pairs.append((candidate, segment))
@@ -1302,6 +1435,7 @@ def _build_symmetric_secondary_structure_states(
         states.append(
             BP5SymmetricSecondaryStructureState(
                 rotamer_name=rotamer_state.rotamer_name,
+                torsion_targets=torsion_targets,
                 candidates=tuple(scored_candidates),
                 scaffold_clash_score=score.clash_score.scaffold_score,
                 bp5_clash_score=score.clash_score.bp5_score,
@@ -1763,6 +1897,24 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--secondary-structure-phi-psi-step",
+        type=float,
+        default=None,
+        help=(
+            "Enable sparse Ramachandran-basin phi/psi scanning at this grid "
+            "spacing in degrees, e.g. 5. Defaults to the single ideal target."
+        ),
+    )
+    parser.add_argument(
+        "--secondary-structure-ramachandran-level",
+        choices=["favored", "allowed"],
+        default="favored",
+        help=(
+            "When phi/psi scanning is enabled, scan favored basin points only "
+            "or the wider allowed basin. Defaults to favored."
+        ),
+    )
+    parser.add_argument(
         "--residues-before",
         type=int,
         default=DEFAULT_SECONDARY_STRUCTURE_RESIDUES_BEFORE,
@@ -1816,6 +1968,12 @@ def main(argv: list[str] | None = None) -> int:
             None if args.secondary_structure == "none" else args.secondary_structure
         ),
         secondary_structure_scan_limit=args.scan_limit,
+        secondary_structure_phi_psi_step_degrees=(
+            args.secondary_structure_phi_psi_step
+        ),
+        secondary_structure_ramachandran_level=(
+            args.secondary_structure_ramachandran_level
+        ),
         residues_before=args.residues_before,
         residues_after=args.residues_after,
         secondary_structure_clash_cutoff=secondary_structure_clash_cutoff,

@@ -264,6 +264,37 @@ def test_nanoring_rotamer_ensemble_scores_secondary_structure_candidates() -> No
         )
 
 
+def test_nanoring_rotamer_ensemble_can_scan_secondary_structure_phi_psi() -> None:
+    placement = place_bp5_rotamer_ensembles_around_nanoring(
+        m=18,
+        cif_path=Path("data/rcsb/BP5.cif"),
+        max_rotamers_per_site=1,
+        secondary_structure="alpha_helix",
+        secondary_structure_phi_psi_step_degrees=5.0,
+        secondary_structure_scan_limit=2,
+        residues_before=1,
+        residues_after=0,
+    )
+
+    assert len(placement.secondary_structure_states) == 2
+    assert len(placement.secondary_structure_candidates) == 9 * 2
+    assert [
+        (
+            state.torsion_targets.phi_degrees,
+            state.torsion_targets.psi_degrees,
+            state.torsion_targets.label,
+        )
+        for state in placement.secondary_structure_states
+    ] == [
+        (-60.0, -45.0, "phi_m060_psi_m045"),
+        (-60.0, -50.0, "phi_m060_psi_m050"),
+    ]
+    assert all(
+        candidate.segment.torsion_targets.label.startswith("phi_")
+        for candidate in placement.secondary_structure_candidates
+    )
+
+
 def test_default_secondary_structure_clash_cutoff_filters_high_overlap_states() -> None:
     placement = place_bp5_rotamer_ensembles_around_nanoring(
         m=18,

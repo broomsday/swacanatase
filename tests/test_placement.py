@@ -270,6 +270,48 @@ def test_write_bp5_nanoring_series_can_limit_deterministic_scan_size(
     assert len(secondary_rows) == 9
 
 
+def test_write_bp5_nanoring_series_reports_phi_psi_scan_targets(
+    tmp_path: Path,
+) -> None:
+    written_paths = write_bp5_nanoring_series(
+        output_dir=tmp_path,
+        m_values=(18,),
+        overwrite=True,
+        write_reports=True,
+        max_rotamers_per_site=1,
+        secondary_structure="alpha_helix",
+        secondary_structure_phi_psi_step_degrees=5.0,
+        secondary_structure_scan_limit=2,
+        residues_before=1,
+        residues_after=0,
+    )
+
+    secondary_structure_paths = [
+        path for path in written_paths if path.parent.name == "secondary_structure"
+    ]
+    with (tmp_path / "reports" / "secondary_structure_scores.csv").open(
+        newline=""
+    ) as file:
+        secondary_rows = list(csv.DictReader(file))
+    with (tmp_path / "reports" / "run_metadata.json").open() as file:
+        metadata = json.load(file)
+
+    assert len(secondary_structure_paths) == 2
+    assert any(
+        path.name.endswith("_alpha_helix_phi_m060_psi_m045_pre1_post0.cif")
+        for path in secondary_structure_paths
+    )
+    assert {row["phi_psi_label"] for row in secondary_rows} == {
+        "phi_m060_psi_m045",
+        "phi_m060_psi_m050",
+    }
+    assert {row["ramachandran_level"] for row in secondary_rows} == {"favored"}
+    assert metadata["secondary_structure_phi_psi_step_degrees"] == 5.0
+    assert metadata["secondary_structure_ramachandran_level"] == "favored"
+    assert metadata["available_secondary_structure_targets"] > 2
+    assert metadata["summaries"][0]["secondary_structure_states_scanned"] == 2
+
+
 def test_write_bp5_nanoring_series_defaults_to_three_residue_segment_context(
     tmp_path: Path,
 ) -> None:

@@ -11,6 +11,7 @@ from .bp5_rotamers import BP5RotamerPlacement
 from .clashes import score_heavy_atom_clashes
 
 SecondaryStructureType = Literal["alpha_helix", "beta_strand"]
+RamachandranLevel = Literal["favored", "allowed"]
 
 BACKBONE_ATOM_NAMES = ("N", "CA", "C", "O")
 BP5_TERMINAL_ATOM_NAMES = ("H", "H2", "OXT", "HXT")
@@ -38,6 +39,22 @@ CARBONYL_O_DIHEDRAL_DEGREES = 180.0
 class BackboneTorsionTargets:
     phi_degrees: float
     psi_degrees: float
+    label: str = "ideal"
+    ramachandran_level: str = "ideal"
+
+
+@dataclass(frozen=True)
+class RamachandranBasin:
+    """Sparse basin approximation used for deterministic phi/psi scans."""
+
+    secondary_structure_type: SecondaryStructureType
+    name: str
+    center_phi_degrees: float
+    center_psi_degrees: float
+    favored_phi_radius_degrees: float
+    favored_psi_radius_degrees: float
+    allowed_phi_radius_degrees: float
+    allowed_psi_radius_degrees: float
 
 
 @dataclass(frozen=True)
@@ -98,6 +115,135 @@ SECONDARY_STRUCTURE_TARGETS: dict[SecondaryStructureType, BackboneTorsionTargets
     "beta_strand": BackboneTorsionTargets(phi_degrees=-135.0, psi_degrees=135.0),
 }
 
+RAMACHANDRAN_DISALLOWED = 0
+RAMACHANDRAN_ALLOWED = 1
+RAMACHANDRAN_FAVORED = 2
+
+# First-pass analytic scan windows around ideal alpha/beta centers. These are
+# intentionally sparse and replaceable with residue-class density grids such as
+# MolProbity/Top500 ``rama500-*.data`` files if those are hydrated locally later.
+RAMACHANDRAN_BASINS: dict[SecondaryStructureType, RamachandranBasin] = {
+    "alpha_helix": RamachandranBasin(
+        secondary_structure_type="alpha_helix",
+        name="alpha_r",
+        center_phi_degrees=-60.0,
+        center_psi_degrees=-45.0,
+        favored_phi_radius_degrees=20.0,
+        favored_psi_radius_degrees=25.0,
+        allowed_phi_radius_degrees=35.0,
+        allowed_psi_radius_degrees=40.0,
+    ),
+    "beta_strand": RamachandranBasin(
+        secondary_structure_type="beta_strand",
+        name="beta",
+        center_phi_degrees=-135.0,
+        center_psi_degrees=135.0,
+        favored_phi_radius_degrees=35.0,
+        favored_psi_radius_degrees=30.0,
+        allowed_phi_radius_degrees=55.0,
+        allowed_psi_radius_degrees=45.0,
+    ),
+}
+
+
+def phi_psi_grid_values(step_degrees: float = 5.0) -> np.ndarray:
+    """Return periodic Ramachandran grid coordinates from -180 to <180."""
+    step = _validate_phi_psi_step(step_degrees)
+    return np.arange(-180.0, 180.0, step, dtype=float)
+
+
+def secondary_structure_phi_psi_scan_matrix(
+    secondary_structure_type: SecondaryStructureType,
+    step_degrees: float = 5.0,
+) -> np.ndarray:
+    """Return a sparse phi/psi mask for one ideal secondary-structure basin.
+
+    Rows are phi values and columns are psi values, both ordered as
+    ``phi_psi_grid_values(step_degrees)``. Values are 0 for disallowed,
+    1 for allowed, and 2 for favored.
+    """
+    basin = _require_ramachandran_basin(secondary_structure_type)
+    grid_values = phi_psi_grid_values(step_degrees)
+    matrix = np.zeros((len(grid_values), len(grid_values)), dtype=np.uint8)
+    for phi_index, phi_degrees in enumerate(grid_values):
+        for psi_index, psi_degrees in enumerate(grid_values):
+            matrix[phi_index, psi_index] = _classify_basin_phi_psi(
+                basin=basin,
+                phi_degrees=float(phi_degrees),
+                psi_degrees=float(psi_degrees),
+            )
+    return matrix
+
+
+def secondary_structure_phi_psi_scan_targets(
+    secondary_structure_type: SecondaryStructureType,
+    step_degrees: float = 5.0,
+    ramachandran_level: RamachandranLevel = "favored",
+) -> tuple[BackboneTorsionTargets, ...]:
+    """Return deterministic sparse phi/psi targets around an ideal basin.
+
+    Targets are sorted from the basin center outward so scan limits keep the
+    most ideal-like torsions first.
+    """
+    if ramachandran_level not in {"favored", "allowed"}:
+        raise ValueError("ramachandran_level must be 'favored' or 'allowed'")
+    basin = _require_ramachandran_basin(secondary_structure_type)
+    minimum_classification = (
+        RAMACHANDRAN_FAVORED
+        if ramachandran_level == "favored"
+        else RAMACHANDRAN_ALLOWED
+    )
+    targets: list[BackboneTorsionTargets] = []
+    for phi_degrees in phi_psi_grid_values(step_degrees):
+        for psi_degrees in phi_psi_grid_values(step_degrees):
+            classification = _classify_basin_phi_psi(
+                basin=basin,
+                phi_degrees=float(phi_degrees),
+                psi_degrees=float(psi_degrees),
+            )
+            if classification < minimum_classification:
+                continue
+            level = (
+                "favored"
+                if classification == RAMACHANDRAN_FAVORED
+                else "allowed"
+            )
+            targets.append(
+                BackboneTorsionTargets(
+                    phi_degrees=float(phi_degrees),
+                    psi_degrees=float(psi_degrees),
+                    label=_phi_psi_target_label(
+                        phi_degrees=float(phi_degrees),
+                        psi_degrees=float(psi_degrees),
+                    ),
+                    ramachandran_level=level,
+                )
+            )
+    return tuple(
+        sorted(
+            targets,
+            key=lambda target: (
+                _elliptical_basin_distance(
+                    basin=basin,
+                    phi_degrees=target.phi_degrees,
+                    psi_degrees=target.psi_degrees,
+                    phi_radius_degrees=basin.favored_phi_radius_degrees,
+                    psi_radius_degrees=basin.favored_psi_radius_degrees,
+                ),
+                abs(_signed_angle_delta(
+                    target.phi_degrees,
+                    basin.center_phi_degrees,
+                )),
+                abs(_signed_angle_delta(
+                    target.psi_degrees,
+                    basin.center_psi_degrees,
+                )),
+                target.phi_degrees,
+                target.psi_degrees,
+            ),
+        )
+    )
+
 
 def build_regular_secondary_structure_segment(
     bp5_rotamer: BP5RotamerPlacement | struc.AtomArray,
@@ -107,6 +253,7 @@ def build_regular_secondary_structure_segment(
     chain_id: str = "A",
     starting_residue_id: int = 1,
     starting_atom_id: int = 1,
+    torsion_targets: BackboneTorsionTargets | None = None,
 ) -> SecondaryStructureSegment:
     """Grow a deterministic regular backbone segment around a fixed BP5 frame."""
     if residues_before < 0 or residues_after < 0:
@@ -123,7 +270,11 @@ def build_regular_secondary_structure_segment(
     )
     _require_atom_names(bp5, ("N", "CA", "C", "O"))
 
-    torsion_targets = SECONDARY_STRUCTURE_TARGETS[secondary_structure_type]
+    torsion_targets = (
+        SECONDARY_STRUCTURE_TARGETS[secondary_structure_type]
+        if torsion_targets is None
+        else torsion_targets
+    )
     bp5_residue_id = starting_residue_id + residues_before
     backbone_coords = _grow_backbone_coordinates(
         bp5=bp5,
@@ -316,6 +467,96 @@ def measure_secondary_structure_orientation(
         n_terminal_exit_vector=n_terminal_exit_vector,
         c_terminal_exit_vector=c_terminal_exit_vector,
     )
+
+
+def _require_ramachandran_basin(
+    secondary_structure_type: SecondaryStructureType,
+) -> RamachandranBasin:
+    try:
+        return RAMACHANDRAN_BASINS[secondary_structure_type]
+    except KeyError as error:
+        raise ValueError(
+            "secondary_structure_type must be 'alpha_helix' or 'beta_strand'"
+        ) from error
+
+
+def _validate_phi_psi_step(step_degrees: float) -> float:
+    step = float(step_degrees)
+    if step <= 0.0:
+        raise ValueError("step_degrees must be positive")
+    step_count = 360.0 / step
+    if not np.isclose(step_count, round(step_count)):
+        raise ValueError("step_degrees must evenly divide 360 degrees")
+    return step
+
+
+def _classify_basin_phi_psi(
+    basin: RamachandranBasin,
+    phi_degrees: float,
+    psi_degrees: float,
+) -> int:
+    if (
+        _elliptical_basin_distance(
+            basin=basin,
+            phi_degrees=phi_degrees,
+            psi_degrees=psi_degrees,
+            phi_radius_degrees=basin.favored_phi_radius_degrees,
+            psi_radius_degrees=basin.favored_psi_radius_degrees,
+        )
+        <= 1.0
+    ):
+        return RAMACHANDRAN_FAVORED
+    if (
+        _elliptical_basin_distance(
+            basin=basin,
+            phi_degrees=phi_degrees,
+            psi_degrees=psi_degrees,
+            phi_radius_degrees=basin.allowed_phi_radius_degrees,
+            psi_radius_degrees=basin.allowed_psi_radius_degrees,
+        )
+        <= 1.0
+    ):
+        return RAMACHANDRAN_ALLOWED
+    return RAMACHANDRAN_DISALLOWED
+
+
+def _elliptical_basin_distance(
+    basin: RamachandranBasin,
+    phi_degrees: float,
+    psi_degrees: float,
+    phi_radius_degrees: float,
+    psi_radius_degrees: float,
+) -> float:
+    phi_delta = _signed_angle_delta(phi_degrees, basin.center_phi_degrees)
+    psi_delta = _signed_angle_delta(psi_degrees, basin.center_psi_degrees)
+    return float(
+        np.sqrt(
+            (phi_delta / phi_radius_degrees) ** 2
+            + (psi_delta / psi_radius_degrees) ** 2
+        )
+    )
+
+
+def _phi_psi_target_label(phi_degrees: float, psi_degrees: float) -> str:
+    return (
+        f"phi_{_signed_angle_label_component(phi_degrees)}_"
+        f"psi_{_signed_angle_label_component(psi_degrees)}"
+    )
+
+
+def _signed_angle_label_component(angle_degrees: float) -> str:
+    rounded = int(round(_normalize_signed_angle(angle_degrees)))
+    prefix = "p" if rounded >= 0 else "m"
+    return f"{prefix}{abs(rounded):03d}"
+
+
+def _normalize_signed_angle(angle_degrees: float) -> float:
+    normalized = (angle_degrees + 180.0) % 360.0 - 180.0
+    return 180.0 if np.isclose(normalized, -180.0) else float(normalized)
+
+
+def _signed_angle_delta(angle_degrees: float, reference_degrees: float) -> float:
+    return float((angle_degrees - reference_degrees + 180.0) % 360.0 - 180.0)
 
 
 def _grow_backbone_coordinates(

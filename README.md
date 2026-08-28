@@ -146,6 +146,15 @@ keeps states entering this interior volume. Override overlap cutoffs with
 `--rotamer-clash-cutoff` or `--secondary-structure-clash-cutoff`; use
 `--no-clash-cutoffs` to disable the overlap cutoffs.
 
+By default, `--secondary-structure alpha_helix` and
+`--secondary-structure beta_strand` grow a single ideal phi/psi target. Add
+`--secondary-structure-phi-psi-step 5` to scan a sparse 5-degree
+first-pass Ramachandran-basin approximation around the ideal target instead.
+The scan keeps only favored basin points by default; use
+`--secondary-structure-ramachandran-level allowed` to include the wider allowed
+basin. Reports include `phi_degrees`, `psi_degrees`, `phi_psi_label`, and
+`ramachandran_level`.
+
 Report outputs:
 
 - `data/generated/reports/rotamer_scores.csv`
@@ -163,6 +172,7 @@ uv run swacanatase-generate-bp5-nanorings \
   --output-dir data/generated \
   --enumerate-bp5-rotamers \
   --secondary-structure alpha_helix \
+  --secondary-structure-phi-psi-step 5 \
   --write-reports \
   --scan-limit 2 \
   --overwrite
