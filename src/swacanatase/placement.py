@@ -43,6 +43,8 @@ DEFAULT_SECONDARY_STRUCTURE_OUTPUT_DIR = (
     DEFAULT_GENERATED_DATA_DIR / "secondary_structure"
 )
 DEFAULT_REPORT_OUTPUT_DIR = DEFAULT_GENERATED_DATA_DIR / "reports"
+DEFAULT_SECONDARY_STRUCTURE_RESIDUES_BEFORE = 2
+DEFAULT_SECONDARY_STRUCTURE_RESIDUES_AFTER = 2
 RING_AXIS = np.array([0.0, 0.0, 1.0], dtype=float)
 BP5_VIRTUAL_CARBON_ATOMS = frozenset({"CV1", "CV2"})
 BP5_BACKBONE_ATOMS = frozenset({"N", "CA", "C", "O", "OXT"})
@@ -423,8 +425,8 @@ def place_bp5_rotamer_ensembles_around_nanoring(
     rotamer_clash_cutoff: float | None = None,
     secondary_structure: SecondaryStructureType | None = None,
     secondary_structure_scan_limit: int | None = None,
-    residues_before: int = 0,
-    residues_after: int = 0,
+    residues_before: int = DEFAULT_SECONDARY_STRUCTURE_RESIDUES_BEFORE,
+    residues_after: int = DEFAULT_SECONDARY_STRUCTURE_RESIDUES_AFTER,
     secondary_structure_clash_cutoff: float | None = None,
 ) -> BP5NanoringRotamerPlacement:
     """Place BP5/Pd sidechains and enumerate fixed-active-site chi rotamers."""
@@ -544,8 +546,8 @@ def write_bp5_nanoring_series(
     rotamer_clash_cutoff: float | None = None,
     secondary_structure: SecondaryStructureType | None = None,
     secondary_structure_scan_limit: int | None = None,
-    residues_before: int = 0,
-    residues_after: int = 0,
+    residues_before: int = DEFAULT_SECONDARY_STRUCTURE_RESIDUES_BEFORE,
+    residues_after: int = DEFAULT_SECONDARY_STRUCTURE_RESIDUES_AFTER,
     secondary_structure_clash_cutoff: float | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> list[Path]:
@@ -1559,14 +1561,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--residues-before",
         type=int,
-        default=0,
-        help="Number of residues to grow before BP5 in secondary-structure mode.",
+        default=DEFAULT_SECONDARY_STRUCTURE_RESIDUES_BEFORE,
+        help=(
+            "Number of residues to grow before BP5 in secondary-structure mode. "
+            f"Defaults to {DEFAULT_SECONDARY_STRUCTURE_RESIDUES_BEFORE}."
+        ),
     )
     parser.add_argument(
         "--residues-after",
         type=int,
-        default=0,
-        help="Number of residues to grow after BP5 in secondary-structure mode.",
+        default=DEFAULT_SECONDARY_STRUCTURE_RESIDUES_AFTER,
+        help=(
+            "Number of residues to grow after BP5 in secondary-structure mode. "
+            f"Defaults to {DEFAULT_SECONDARY_STRUCTURE_RESIDUES_AFTER}."
+        ),
     )
     parser.add_argument("--format", choices=["pdb", "cif"], default="cif")
     parser.add_argument(

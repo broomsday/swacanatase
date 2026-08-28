@@ -265,6 +265,31 @@ def test_write_bp5_nanoring_series_can_limit_deterministic_scan_size(
     assert len(secondary_rows) == 9
 
 
+def test_write_bp5_nanoring_series_defaults_to_two_residue_segment_context(
+    tmp_path: Path,
+) -> None:
+    written_paths = write_bp5_nanoring_series(
+        output_dir=tmp_path,
+        m_values=(18,),
+        overwrite=True,
+        enumerate_bp5_rotamers=True,
+        write_reports=True,
+        rotamer_scan_limit=1,
+        secondary_structure="alpha_helix",
+    )
+
+    secondary_structure_paths = [
+        path for path in written_paths if path.parent.name == "secondary_structure"
+    ]
+    with (tmp_path / "reports" / "run_metadata.json").open() as file:
+        metadata = json.load(file)
+
+    assert len(secondary_structure_paths) == 1
+    assert secondary_structure_paths[0].name.endswith("_alpha_helix_pre2_post2.cif")
+    assert metadata["residues_before"] == 2
+    assert metadata["residues_after"] == 2
+
+
 def test_placement_cli_exposes_rotamer_and_secondary_structure_output_modes(
     tmp_path: Path,
 ) -> None:

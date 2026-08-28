@@ -125,6 +125,8 @@ Use `--write-reports` to persist score tables and run metadata under
 `data/generated/reports/`. Use `--scan-limit N` for early tests; it scans only
 the first `N` deterministic BP5 chi-rotamer states and grows at most the first
 `N` selected secondary-structure states.
+Secondary-structure growth defaults to two residues before and two residues
+after BP5; override with `--residues-before` and `--residues-after` when needed.
 
 Report outputs:
 
@@ -143,8 +145,6 @@ uv run swacanatase-generate-bp5-nanorings \
   --output-dir data/generated \
   --enumerate-bp5-rotamers \
   --secondary-structure alpha_helix \
-  --residues-before 1 \
-  --residues-after 1 \
   --write-reports \
   --scan-limit 2 \
   --overwrite
