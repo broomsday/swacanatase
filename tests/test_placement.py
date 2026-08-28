@@ -1,3 +1,5 @@
+import csv
+import json
 from pathlib import Path
 
 import numpy as np
@@ -189,6 +191,80 @@ def test_write_bp5_nanoring_series_can_write_rotamer_and_secondary_structure_out
     )
 
 
+def test_write_bp5_nanoring_series_can_write_score_reports(tmp_path: Path) -> None:
+    written_paths = write_bp5_nanoring_series(
+        output_dir=tmp_path,
+        m_values=(18,),
+        overwrite=True,
+        enumerate_bp5_rotamers=True,
+        write_reports=True,
+        max_rotamers_per_site=1,
+        secondary_structure="alpha_helix",
+        residues_before=1,
+        residues_after=1,
+    )
+
+    rotamer_report_path = tmp_path / "reports" / "rotamer_scores.csv"
+    secondary_report_path = tmp_path / "reports" / "secondary_structure_scores.csv"
+    metadata_path = tmp_path / "reports" / "run_metadata.json"
+
+    assert rotamer_report_path in written_paths
+    assert secondary_report_path in written_paths
+    assert metadata_path in written_paths
+
+    with rotamer_report_path.open(newline="") as file:
+        rotamer_rows = list(csv.DictReader(file))
+    with secondary_report_path.open(newline="") as file:
+        secondary_rows = list(csv.DictReader(file))
+    with metadata_path.open() as file:
+        metadata = json.load(file)
+
+    assert len(rotamer_rows) == 9 * 6
+    assert len(secondary_rows) == 9
+    assert {row["accepted"] for row in rotamer_rows} == {"False", "True"}
+    assert {row["accepted"] for row in secondary_rows} == {"True"}
+    assert metadata["available_rotamer_states"] == 6
+    assert metadata["summaries"][0]["rotamer_states_scanned"] == 6
+    assert metadata["summaries"][0]["secondary_structure_states_scanned"] == 1
+
+
+def test_write_bp5_nanoring_series_can_limit_deterministic_scan_size(
+    tmp_path: Path,
+) -> None:
+    written_paths = write_bp5_nanoring_series(
+        output_dir=tmp_path,
+        m_values=(18,),
+        overwrite=True,
+        enumerate_bp5_rotamers=True,
+        write_reports=True,
+        rotamer_scan_limit=2,
+        secondary_structure_scan_limit=1,
+        secondary_structure="beta_strand",
+        residues_before=1,
+        residues_after=0,
+    )
+
+    rotamer_paths = [path for path in written_paths if path.parent.name == "rotamers"]
+    secondary_structure_paths = [
+        path for path in written_paths if path.parent.name == "secondary_structure"
+    ]
+    with (tmp_path / "reports" / "rotamer_scores.csv").open(newline="") as file:
+        rotamer_rows = list(csv.DictReader(file))
+    with (tmp_path / "reports" / "secondary_structure_scores.csv").open(
+        newline=""
+    ) as file:
+        secondary_rows = list(csv.DictReader(file))
+
+    assert len(rotamer_paths) == 2
+    assert len(secondary_structure_paths) == 1
+    assert {row["rotamer_name"] for row in rotamer_rows} == {
+        "gminus_m90",
+        "gminus_p90",
+    }
+    assert len(rotamer_rows) == 9 * 2
+    assert len(secondary_rows) == 9
+
+
 def test_placement_cli_exposes_rotamer_and_secondary_structure_output_modes(
     tmp_path: Path,
 ) -> None:
@@ -200,6 +276,9 @@ def test_placement_cli_exposes_rotamer_and_secondary_structure_output_modes(
             str(tmp_path),
             "--overwrite",
             "--enumerate-bp5-rotamers",
+            "--write-reports",
+            "--scan-limit",
+            "1",
             "--max-rotamers-per-site",
             "1",
             "--secondary-structure",
@@ -214,6 +293,9 @@ def test_placement_cli_exposes_rotamer_and_secondary_structure_output_modes(
     assert exit_code == 0
     assert (tmp_path / "rotamers").is_dir()
     assert (tmp_path / "secondary_structure").is_dir()
+    assert (tmp_path / "reports" / "rotamer_scores.csv").is_file()
+    assert (tmp_path / "reports" / "secondary_structure_scores.csv").is_file()
+    assert (tmp_path / "reports" / "run_metadata.json").is_file()
     assert len(list((tmp_path / "rotamers").glob("*.cif"))) == 1
     assert len(list((tmp_path / "secondary_structure").glob("*.cif"))) == 1
 

@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import json
+import sys
 from collections import defaultdict
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import TypeVar
 
 import biotite.structure as struc
 import numpy as np
@@ -12,7 +17,11 @@ import numpy as np
 from tuber.writers import write_structure
 
 from .active_site import build_bp5_palladium_active_site
-from .bp5_rotamers import BP5RotamerPlacement, enumerate_bp5_chi_rotamers
+from .bp5_rotamers import (
+    BP5RotamerPlacement,
+    DEFAULT_BP5_CHI_ROTAMERS,
+    enumerate_bp5_chi_rotamers,
+)
 from .clashes import score_heavy_atom_clashes
 from .ligands import DEFAULT_LIGAND_DIR, load_bp5_bond_pairs
 from .nanoring import generate_armchair_nanoring
@@ -33,9 +42,63 @@ DEFAULT_ROTAMER_OUTPUT_DIR = DEFAULT_GENERATED_DATA_DIR / "rotamers"
 DEFAULT_SECONDARY_STRUCTURE_OUTPUT_DIR = (
     DEFAULT_GENERATED_DATA_DIR / "secondary_structure"
 )
+DEFAULT_REPORT_OUTPUT_DIR = DEFAULT_GENERATED_DATA_DIR / "reports"
 RING_AXIS = np.array([0.0, 0.0, 1.0], dtype=float)
 BP5_VIRTUAL_CARBON_ATOMS = frozenset({"CV1", "CV2"})
 BP5_BACKBONE_ATOMS = frozenset({"N", "CA", "C", "O", "OXT"})
+_T = TypeVar("_T")
+
+ROTAMER_REPORT_FIELDS = (
+    "m",
+    "units",
+    "anchor_phase_offset",
+    "snap_virtual_carbons",
+    "residue_id",
+    "anchor_angle_degrees",
+    "rotamer_name",
+    "chi1_target_degrees",
+    "chi2_target_degrees",
+    "chi1_degrees",
+    "chi2_degrees",
+    "chi2_validation_degrees",
+    "state_scan_index",
+    "state_score_rank",
+    "accepted",
+    "rotamer_clash_score",
+    "output_path",
+)
+SECONDARY_STRUCTURE_REPORT_FIELDS = (
+    "m",
+    "units",
+    "anchor_phase_offset",
+    "snap_virtual_carbons",
+    "secondary_structure",
+    "residues_before",
+    "residues_after",
+    "residue_id",
+    "anchor_angle_degrees",
+    "rotamer_name",
+    "state_scan_index",
+    "state_score_rank",
+    "accepted",
+    "secondary_clash_score",
+    "scaffold_clash_score",
+    "bp5_clash_score",
+    "neighboring_backbone_clash_score",
+    "radial_alignment",
+    "tangential_alignment",
+    "axial_alignment",
+    "secondary_structure_direction_x",
+    "secondary_structure_direction_y",
+    "secondary_structure_direction_z",
+    "n_terminal_exit_vector_x",
+    "n_terminal_exit_vector_y",
+    "n_terminal_exit_vector_z",
+    "c_terminal_exit_vector_x",
+    "c_terminal_exit_vector_y",
+    "c_terminal_exit_vector_z",
+    "output_path",
+)
 
 
 @dataclass(frozen=True)
@@ -355,16 +418,23 @@ def place_bp5_rotamer_ensembles_around_nanoring(
     anchor_phase_offset: int = 1,
     sidechain_direction: str = "outward",
     snap_virtual_carbons: bool = False,
+    rotamer_scan_limit: int | None = None,
     max_rotamers_per_site: int | None = None,
     rotamer_clash_cutoff: float | None = None,
     secondary_structure: SecondaryStructureType | None = None,
+    secondary_structure_scan_limit: int | None = None,
     residues_before: int = 0,
     residues_after: int = 0,
     secondary_structure_clash_cutoff: float | None = None,
 ) -> BP5NanoringRotamerPlacement:
     """Place BP5/Pd sidechains and enumerate fixed-active-site chi rotamers."""
+    _validate_positive_limit(rotamer_scan_limit, "rotamer_scan_limit")
     if max_rotamers_per_site is not None and max_rotamers_per_site < 1:
         raise ValueError("max_rotamers_per_site must be at least 1")
+    _validate_positive_limit(
+        secondary_structure_scan_limit,
+        "secondary_structure_scan_limit",
+    )
     if residues_before < 0 or residues_after < 0:
         raise ValueError("residue counts must be non-negative")
     if secondary_structure not in {None, "alpha_helix", "beta_strand"}:
@@ -383,6 +453,10 @@ def place_bp5_rotamer_ensembles_around_nanoring(
         snap_virtual_carbons=snap_virtual_carbons,
     )
     bond_pairs = load_bp5_bond_pairs(cif_path=cif_path)
+    rotamers_to_scan = _limit_tuple(
+        DEFAULT_BP5_CHI_ROTAMERS,
+        rotamer_scan_limit,
+    )
 
     candidates: list[BP5RotamerPlacement] = []
     for residue_id in range(1, len(rigid_placement.anchor_pairs) + 1):
@@ -392,6 +466,7 @@ def place_bp5_rotamer_ensembles_around_nanoring(
         residue_candidates = enumerate_bp5_chi_rotamers(
             atom_array=residue,
             bond_pairs=bond_pairs,
+            rotamers=rotamers_to_scan,
             residue_id=residue_id,
         )
         candidates.extend(residue_candidates)
@@ -415,8 +490,12 @@ def place_bp5_rotamer_ensembles_around_nanoring(
     secondary_states: tuple[BP5SymmetricSecondaryStructureState, ...] = ()
     accepted_secondary_states: tuple[BP5SymmetricSecondaryStructureState, ...] = ()
     if secondary_structure is not None:
+        rotamer_states_for_secondary_structure = _limit_tuple(
+            accepted_rotamer_states,
+            secondary_structure_scan_limit,
+        )
         secondary_states = _build_symmetric_secondary_structure_states(
-            rotamer_states=accepted_rotamer_states,
+            rotamer_states=rotamer_states_for_secondary_structure,
             nanoring=rigid_placement.nanoring,
             bond_pairs=bond_pairs,
             anchor_pairs=rigid_placement.anchor_pairs,
@@ -459,16 +538,25 @@ def write_bp5_nanoring_series(
     file_format: str = "cif",
     overwrite: bool = False,
     enumerate_bp5_rotamers: bool = False,
+    write_reports: bool = False,
+    rotamer_scan_limit: int | None = None,
     max_rotamers_per_site: int | None = None,
     rotamer_clash_cutoff: float | None = None,
     secondary_structure: SecondaryStructureType | None = None,
+    secondary_structure_scan_limit: int | None = None,
     residues_before: int = 0,
     residues_after: int = 0,
     secondary_structure_clash_cutoff: float | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> list[Path]:
     """Write nanoring-only and BP5-placed structures for each requested M value."""
+    _validate_positive_limit(rotamer_scan_limit, "rotamer_scan_limit")
     if max_rotamers_per_site is not None and max_rotamers_per_site < 1:
         raise ValueError("max_rotamers_per_site must be at least 1")
+    _validate_positive_limit(
+        secondary_structure_scan_limit,
+        "secondary_structure_scan_limit",
+    )
     if residues_before < 0 or residues_after < 0:
         raise ValueError("residue counts must be non-negative")
     if secondary_structure not in {None, "alpha_helix", "beta_strand"}:
@@ -476,20 +564,31 @@ def write_bp5_nanoring_series(
             "secondary_structure must be None, 'alpha_helix', or 'beta_strand'"
         )
 
+    m_values = tuple(m_values)
     output_dir = Path(output_dir)
     nanoring_output_dir = output_dir / "nanoring"
     theozyme_output_dir = output_dir / "theozyme"
     rotamer_output_dir = output_dir / "rotamers"
     secondary_structure_output_dir = output_dir / "secondary_structure"
+    report_output_dir = output_dir / "reports"
     nanoring_output_dir.mkdir(parents=True, exist_ok=True)
     theozyme_output_dir.mkdir(parents=True, exist_ok=True)
     if enumerate_bp5_rotamers:
         rotamer_output_dir.mkdir(parents=True, exist_ok=True)
     if secondary_structure is not None:
         secondary_structure_output_dir.mkdir(parents=True, exist_ok=True)
+    if write_reports:
+        report_output_dir.mkdir(parents=True, exist_ok=True)
 
     written_paths: list[Path] = []
-    for m in m_values:
+    rotamer_report_rows: list[dict[str, object]] = []
+    secondary_structure_report_rows: list[dict[str, object]] = []
+    run_summaries: list[dict[str, object]] = []
+    for m_index, m in enumerate(m_values, start=1):
+        _emit_progress(
+            progress,
+            f"[{m_index}/{len(m_values)}] M={m}: generating scaffold and rigid BP5 placement",
+        )
         placement = place_bp5_sidechains_around_nanoring(
             m=m,
             units=units,
@@ -514,22 +613,59 @@ def write_bp5_nanoring_series(
                 overwrite=overwrite,
             )
         )
+        _emit_progress(
+            progress,
+            f"[{m_index}/{len(m_values)}] M={m}: wrote scaffold and rigid complex",
+        )
 
         if not enumerate_bp5_rotamers and secondary_structure is None:
+            run_summaries.append(
+                {
+                    "m": m,
+                    "anchor_count": len(placement.anchor_pairs),
+                    "rotamer_states_scanned": 0,
+                    "rotamer_states_accepted": 0,
+                    "secondary_structure_states_scanned": 0,
+                    "secondary_structure_states_accepted": 0,
+                }
+            )
             continue
 
+        rotamer_states_to_scan = min(
+            len(DEFAULT_BP5_CHI_ROTAMERS),
+            rotamer_scan_limit or len(DEFAULT_BP5_CHI_ROTAMERS),
+        )
+        _emit_progress(
+            progress,
+            (
+                f"[{m_index}/{len(m_values)}] M={m}: scanning "
+                f"{rotamer_states_to_scan} rotamer state(s) across "
+                f"{len(placement.anchor_pairs)} BP5 site(s)"
+            ),
+        )
         rotamer_placement = place_bp5_rotamer_ensembles_around_nanoring(
             m=m,
             units=units,
             anchor_phase_offset=anchor_phase_offset,
             snap_virtual_carbons=snap_virtual_carbons,
+            rotamer_scan_limit=rotamer_scan_limit,
             max_rotamers_per_site=max_rotamers_per_site,
             rotamer_clash_cutoff=rotamer_clash_cutoff,
             secondary_structure=secondary_structure,
+            secondary_structure_scan_limit=secondary_structure_scan_limit,
             residues_before=residues_before,
             residues_after=residues_after,
             secondary_structure_clash_cutoff=secondary_structure_clash_cutoff,
         )
+        _emit_progress(
+            progress,
+            (
+                f"[{m_index}/{len(m_values)}] M={m}: accepted "
+                f"{len(rotamer_placement.accepted_rotamer_states)}/"
+                f"{len(rotamer_placement.rotamer_states)} rotamer state(s)"
+            ),
+        )
+        rotamer_output_paths: dict[str, Path] = {}
         if enumerate_bp5_rotamers:
             for state in rotamer_placement.accepted_rotamer_states:
                 rotamer_path = (
@@ -546,7 +682,9 @@ def write_bp5_nanoring_series(
                         overwrite=overwrite,
                     )
                 )
+                rotamer_output_paths[state.rotamer_name] = rotamer_path
 
+        secondary_structure_output_paths: dict[str, Path] = {}
         for state in rotamer_placement.accepted_secondary_structure_states:
             segment_path = (
                 secondary_structure_output_dir
@@ -565,7 +703,278 @@ def write_bp5_nanoring_series(
                     overwrite=overwrite,
                 )
             )
+            secondary_structure_output_paths[state.rotamer_name] = segment_path
+        if secondary_structure is not None:
+            _emit_progress(
+                progress,
+                (
+                    f"[{m_index}/{len(m_values)}] M={m}: accepted "
+                    f"{len(rotamer_placement.accepted_secondary_structure_states)}/"
+                    f"{len(rotamer_placement.secondary_structure_states)} "
+                    f"{secondary_structure} state(s)"
+                ),
+            )
+        if write_reports:
+            rotamer_report_rows.extend(
+                _rotamer_report_rows(
+                    placement=rotamer_placement,
+                    units=units,
+                    anchor_phase_offset=anchor_phase_offset,
+                    snap_virtual_carbons=snap_virtual_carbons,
+                    output_paths=rotamer_output_paths,
+                )
+            )
+            secondary_structure_report_rows.extend(
+                _secondary_structure_report_rows(
+                    placement=rotamer_placement,
+                    units=units,
+                    anchor_phase_offset=anchor_phase_offset,
+                    snap_virtual_carbons=snap_virtual_carbons,
+                    secondary_structure=secondary_structure,
+                    residues_before=residues_before,
+                    residues_after=residues_after,
+                    output_paths=secondary_structure_output_paths,
+                )
+            )
+        run_summaries.append(
+            {
+                "m": m,
+                "anchor_count": len(rotamer_placement.anchor_pairs),
+                "rotamer_states_scanned": len(rotamer_placement.rotamer_states),
+                "rotamer_states_accepted": len(
+                    rotamer_placement.accepted_rotamer_states
+                ),
+                "secondary_structure_states_scanned": len(
+                    rotamer_placement.secondary_structure_states
+                ),
+                "secondary_structure_states_accepted": len(
+                    rotamer_placement.accepted_secondary_structure_states
+                ),
+            }
+        )
+    if write_reports:
+        rotamer_report_path = report_output_dir / "rotamer_scores.csv"
+        secondary_structure_report_path = (
+            report_output_dir / "secondary_structure_scores.csv"
+        )
+        run_metadata_path = report_output_dir / "run_metadata.json"
+        _write_csv_report(
+            path=rotamer_report_path,
+            fieldnames=ROTAMER_REPORT_FIELDS,
+            rows=rotamer_report_rows,
+            overwrite=overwrite,
+        )
+        _write_csv_report(
+            path=secondary_structure_report_path,
+            fieldnames=SECONDARY_STRUCTURE_REPORT_FIELDS,
+            rows=secondary_structure_report_rows,
+            overwrite=overwrite,
+        )
+        _write_json_report(
+            path=run_metadata_path,
+            data={
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "m_values": list(m_values),
+                "units": units,
+                "anchor_phase_offset": anchor_phase_offset,
+                "snap_virtual_carbons": snap_virtual_carbons,
+                "file_format": file_format,
+                "enumerate_bp5_rotamers": enumerate_bp5_rotamers,
+                "rotamer_scan_limit": rotamer_scan_limit,
+                "max_rotamers_per_site": max_rotamers_per_site,
+                "rotamer_clash_cutoff": rotamer_clash_cutoff,
+                "secondary_structure": secondary_structure,
+                "secondary_structure_scan_limit": secondary_structure_scan_limit,
+                "residues_before": residues_before,
+                "residues_after": residues_after,
+                "secondary_structure_clash_cutoff": secondary_structure_clash_cutoff,
+                "available_rotamer_states": len(DEFAULT_BP5_CHI_ROTAMERS),
+                "summaries": run_summaries,
+            },
+            overwrite=overwrite,
+        )
+        written_paths.extend(
+            [rotamer_report_path, secondary_structure_report_path, run_metadata_path]
+        )
+        _emit_progress(progress, f"Wrote reports under {report_output_dir}")
     return written_paths
+
+
+def _rotamer_report_rows(
+    placement: BP5NanoringRotamerPlacement,
+    units: float | int,
+    anchor_phase_offset: int,
+    snap_virtual_carbons: bool,
+    output_paths: dict[str, Path],
+) -> list[dict[str, object]]:
+    accepted_names = {state.rotamer_name for state in placement.accepted_rotamer_states}
+    scan_index_by_name = {
+        state.rotamer_name: scan_index
+        for scan_index, state in enumerate(placement.rotamer_states, start=1)
+    }
+    score_rank_by_name = {
+        state.rotamer_name: score_rank
+        for score_rank, state in enumerate(
+            sorted(placement.rotamer_states, key=_rotamer_state_score_key),
+            start=1,
+        )
+    }
+    rows: list[dict[str, object]] = []
+    for state in placement.rotamer_states:
+        for candidate in state.candidates:
+            anchor_pair = placement.anchor_pairs[candidate.residue_id - 1]
+            rows.append(
+                {
+                    "m": placement.m,
+                    "units": units,
+                    "anchor_phase_offset": anchor_phase_offset,
+                    "snap_virtual_carbons": snap_virtual_carbons,
+                    "residue_id": candidate.residue_id,
+                    "anchor_angle_degrees": anchor_pair.angular_midpoint_degrees,
+                    "rotamer_name": candidate.rotamer.name,
+                    "chi1_target_degrees": candidate.rotamer.chi1_degrees,
+                    "chi2_target_degrees": candidate.rotamer.chi2_degrees,
+                    "chi1_degrees": candidate.chi1_degrees,
+                    "chi2_degrees": candidate.chi2_degrees,
+                    "chi2_validation_degrees": candidate.chi2_validation_degrees,
+                    "state_scan_index": scan_index_by_name[candidate.rotamer.name],
+                    "state_score_rank": score_rank_by_name[candidate.rotamer.name],
+                    "accepted": candidate.rotamer.name in accepted_names,
+                    "rotamer_clash_score": state.clash_score,
+                    "output_path": str(output_paths.get(candidate.rotamer.name, "")),
+                }
+            )
+    return rows
+
+
+def _secondary_structure_report_rows(
+    placement: BP5NanoringRotamerPlacement,
+    units: float | int,
+    anchor_phase_offset: int,
+    snap_virtual_carbons: bool,
+    secondary_structure: SecondaryStructureType | None,
+    residues_before: int,
+    residues_after: int,
+    output_paths: dict[str, Path],
+) -> list[dict[str, object]]:
+    if secondary_structure is None:
+        return []
+
+    accepted_names = {
+        state.rotamer_name for state in placement.accepted_secondary_structure_states
+    }
+    scan_index_by_name = {
+        state.rotamer_name: scan_index
+        for scan_index, state in enumerate(placement.secondary_structure_states, start=1)
+    }
+    score_rank_by_name = {
+        state.rotamer_name: score_rank
+        for score_rank, state in enumerate(
+            sorted(placement.secondary_structure_states, key=_secondary_state_score_key),
+            start=1,
+        )
+    }
+    rows: list[dict[str, object]] = []
+    for state in placement.secondary_structure_states:
+        for candidate in state.candidates:
+            residue_id = candidate.rotamer_candidate.residue_id
+            anchor_pair = placement.anchor_pairs[residue_id - 1]
+            metrics = candidate.orientation_metrics
+            rows.append(
+                {
+                    "m": placement.m,
+                    "units": units,
+                    "anchor_phase_offset": anchor_phase_offset,
+                    "snap_virtual_carbons": snap_virtual_carbons,
+                    "secondary_structure": secondary_structure,
+                    "residues_before": residues_before,
+                    "residues_after": residues_after,
+                    "residue_id": residue_id,
+                    "anchor_angle_degrees": anchor_pair.angular_midpoint_degrees,
+                    "rotamer_name": candidate.rotamer_candidate.rotamer.name,
+                    "state_scan_index": scan_index_by_name[
+                        candidate.rotamer_candidate.rotamer.name
+                    ],
+                    "state_score_rank": score_rank_by_name[
+                        candidate.rotamer_candidate.rotamer.name
+                    ],
+                    "accepted": candidate.rotamer_candidate.rotamer.name in accepted_names,
+                    "secondary_clash_score": state.clash_score,
+                    "scaffold_clash_score": state.scaffold_clash_score,
+                    "bp5_clash_score": state.bp5_clash_score,
+                    "neighboring_backbone_clash_score": (
+                        state.neighboring_backbone_clash_score
+                    ),
+                    **_vector_report_columns(
+                        "secondary_structure_direction",
+                        metrics.secondary_structure_direction,
+                    ),
+                    **_vector_report_columns(
+                        "n_terminal_exit_vector",
+                        metrics.n_terminal_exit_vector,
+                    ),
+                    **_vector_report_columns(
+                        "c_terminal_exit_vector",
+                        metrics.c_terminal_exit_vector,
+                    ),
+                    "radial_alignment": metrics.radial_alignment,
+                    "tangential_alignment": metrics.tangential_alignment,
+                    "axial_alignment": metrics.axial_alignment,
+                    "output_path": str(
+                        output_paths.get(candidate.rotamer_candidate.rotamer.name, "")
+                    ),
+                }
+            )
+    return rows
+
+
+def _vector_report_columns(prefix: str, vector: np.ndarray) -> dict[str, float]:
+    return {
+        f"{prefix}_x": float(vector[0]),
+        f"{prefix}_y": float(vector[1]),
+        f"{prefix}_z": float(vector[2]),
+    }
+
+
+def _write_csv_report(
+    path: Path,
+    fieldnames: tuple[str, ...],
+    rows: Iterable[dict[str, object]],
+    overwrite: bool,
+) -> None:
+    _raise_if_exists(path, overwrite=overwrite)
+    with path.open("w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _write_json_report(path: Path, data: dict[str, object], overwrite: bool) -> None:
+    _raise_if_exists(path, overwrite=overwrite)
+    with path.open("w") as file:
+        json.dump(data, file, indent=2, sort_keys=True)
+        file.write("\n")
+
+
+def _raise_if_exists(path: Path, overwrite: bool) -> None:
+    if path.exists() and not overwrite:
+        raise FileExistsError(f"{path} already exists; pass overwrite=True to replace it")
+
+
+def _emit_progress(progress: Callable[[str], None] | None, message: str) -> None:
+    if progress is not None:
+        progress(message)
+
+
+def _validate_positive_limit(value: int | None, name: str) -> None:
+    if value is not None and value < 1:
+        raise ValueError(f"{name} must be at least 1")
+
+
+def _limit_tuple(values: tuple[_T, ...], limit: int | None) -> tuple[_T, ...]:
+    if limit is None:
+        return values
+    return values[:limit]
 
 
 @dataclass(frozen=True)
@@ -1101,6 +1510,20 @@ def main(argv: list[str] | None = None) -> int:
         help="Also write accepted BP5 chi-rotamer complexes under rotamers/.",
     )
     parser.add_argument(
+        "--write-reports",
+        action="store_true",
+        help="Write CSV score reports and JSON run metadata under reports/.",
+    )
+    parser.add_argument(
+        "--scan-limit",
+        type=int,
+        default=None,
+        help=(
+            "Only scan the first N deterministic rotamer states and grow at most "
+            "the first N secondary-structure states."
+        ),
+    )
+    parser.add_argument(
         "--max-rotamers-per-site",
         type=int,
         default=None,
@@ -1167,14 +1590,18 @@ def main(argv: list[str] | None = None) -> int:
         file_format=args.format,
         overwrite=args.overwrite,
         enumerate_bp5_rotamers=args.enumerate_bp5_rotamers,
+        write_reports=args.write_reports,
+        rotamer_scan_limit=args.scan_limit,
         max_rotamers_per_site=args.max_rotamers_per_site,
         rotamer_clash_cutoff=args.rotamer_clash_cutoff,
         secondary_structure=(
             None if args.secondary_structure == "none" else args.secondary_structure
         ),
+        secondary_structure_scan_limit=args.scan_limit,
         residues_before=args.residues_before,
         residues_after=args.residues_after,
         secondary_structure_clash_cutoff=args.secondary_structure_clash_cutoff,
+        progress=lambda message: print(message, file=sys.stderr),
     )
     for path in written_paths:
         print(f"Wrote {path}")

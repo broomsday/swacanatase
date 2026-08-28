@@ -121,6 +121,16 @@ to minimize residuals against the selected adjacent scaffold carbons. Use
 Rotamer and secondary-structure output modes evaluate and write complete
 symmetric states. For example, `--max-rotamers-per-site 1` writes one rotamer
 complex containing all `M/2` BP5 positions, not one file per position.
+Use `--write-reports` to persist score tables and run metadata under
+`data/generated/reports/`. Use `--scan-limit N` for early tests; it scans only
+the first `N` deterministic BP5 chi-rotamer states and grows at most the first
+`N` selected secondary-structure states.
+
+Report outputs:
+
+- `data/generated/reports/rotamer_scores.csv`
+- `data/generated/reports/secondary_structure_scores.csv`
+- `data/generated/reports/run_metadata.json`
 
 Useful options:
 
@@ -131,6 +141,12 @@ uv run swacanatase-generate-bp5-nanorings \
   --anchor-phase-offset 1 \
   --format cif \
   --output-dir data/generated \
+  --enumerate-bp5-rotamers \
+  --secondary-structure alpha_helix \
+  --residues-before 1 \
+  --residues-after 1 \
+  --write-reports \
+  --scan-limit 2 \
   --overwrite
 ```
 
