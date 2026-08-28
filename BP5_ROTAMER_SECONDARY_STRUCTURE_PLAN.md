@@ -199,6 +199,9 @@ Suggested rules:
 - Ignore bonded atom pairs within a single BP5 residue.
 - Ignore `CV1`/`CV2` overlap residuals with their intended scaffold anchors when
   evaluating the established active-site fit.
+- Ignore all intra-residue atom pairs for placement cutoff scoring.
+- Ignore Pd contacts to the two scaffold carbons targeted by `CV1` and `CV2`.
+- Ignore backbone `N`/`C` atom pairs from different residues.
 - Treat `PD` separately from organic atoms, with an explicit minimum distance
   threshold.
 - Use conservative element-pair distance cutoffs rather than full force-field
@@ -317,11 +320,13 @@ Possible options:
 - `--enumerate-bp5-rotamers`
 - `--max-rotamers-per-site K`, interpreted as top `K` symmetric rotamer states
   across the full ring
-- `--rotamer-clash-cutoff VALUE`
+- `--rotamer-clash-cutoff VALUE`, interpreted as total overlap per BP5 site
 - `--secondary-structure {none,alpha_helix,beta_strand}`
 - `--residues-before N`
 - `--residues-after N`
-- `--secondary-structure-clash-cutoff VALUE`
+- `--secondary-structure-clash-cutoff VALUE`, interpreted as total overlap per
+  BP5 site
+- `--no-clash-cutoffs`
 
 Suggested output directories:
 

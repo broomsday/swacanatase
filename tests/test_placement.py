@@ -265,7 +265,7 @@ def test_write_bp5_nanoring_series_can_limit_deterministic_scan_size(
     assert len(secondary_rows) == 9
 
 
-def test_write_bp5_nanoring_series_defaults_to_two_residue_segment_context(
+def test_write_bp5_nanoring_series_defaults_to_three_residue_segment_context(
     tmp_path: Path,
 ) -> None:
     written_paths = write_bp5_nanoring_series(
@@ -274,7 +274,7 @@ def test_write_bp5_nanoring_series_defaults_to_two_residue_segment_context(
         overwrite=True,
         enumerate_bp5_rotamers=True,
         write_reports=True,
-        rotamer_scan_limit=1,
+        rotamer_scan_limit=2,
         secondary_structure="alpha_helix",
     )
 
@@ -285,9 +285,16 @@ def test_write_bp5_nanoring_series_defaults_to_two_residue_segment_context(
         metadata = json.load(file)
 
     assert len(secondary_structure_paths) == 1
-    assert secondary_structure_paths[0].name.endswith("_alpha_helix_pre2_post2.cif")
-    assert metadata["residues_before"] == 2
-    assert metadata["residues_after"] == 2
+    assert secondary_structure_paths[0].name.endswith("_alpha_helix_pre3_post3.cif")
+    assert metadata["residues_before"] == 3
+    assert metadata["residues_after"] == 3
+    assert metadata["rotamer_clash_cutoff"] == 6.0
+    assert metadata["rotamer_clash_cutoff_unit"] == "total_overlap_per_bp5_site"
+    assert metadata["secondary_structure_clash_cutoff"] == 6.0
+    assert (
+        metadata["secondary_structure_clash_cutoff_unit"]
+        == "total_overlap_per_bp5_site"
+    )
 
 
 def test_placement_cli_exposes_rotamer_and_secondary_structure_output_modes(

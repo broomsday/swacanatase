@@ -8,9 +8,13 @@ from swacanatase.bp5_rotamers import (
     DEFAULT_BP5_CHI_ROTAMERS,
     enumerate_bp5_chi_rotamers,
 )
+from swacanatase.clashes import score_heavy_atom_clashes
 from swacanatase.torsions import measure_dihedral
 from swacanatase.ligands import load_bp5_bond_pairs
 from swacanatase.placement import (
+    BP5_VIRTUAL_CARBON_ATOMS,
+    _score_bp5_arrays_against_nanoring,
+    _without_atom_names,
     place_bp5_rotamer_ensembles_around_nanoring,
     place_bp5_sidechains_around_nanoring,
 )
@@ -159,6 +163,40 @@ def test_nanoring_rotamer_ensemble_can_keep_top_k_symmetric_states() -> None:
         assert residue_scores == sorted(residue_scores)
 
 
+def test_bp5_nanoring_clash_score_ignores_virtual_atoms_and_pd_anchor_contacts() -> None:
+    placement = place_bp5_sidechains_around_nanoring(
+        m=18,
+        cif_path=Path("data/rcsb/BP5.cif"),
+    )
+    residue = placement.sidechains[placement.sidechains.res_id == 1]
+    anchor_pair = placement.anchor_pairs[0]
+    scored_residue = _without_atom_names(residue, BP5_VIRTUAL_CARBON_ATOMS)
+    pd_index = scored_residue.atom_name.tolist().index("PD")
+    ignored_anchor_pairs = tuple(
+        (pd_index, anchor_index) for anchor_index in anchor_pair.atom_indices
+    )
+
+    placement_score = _score_bp5_arrays_against_nanoring(
+        bp5_arrays=(scored_residue,),
+        nanoring=placement.nanoring,
+        anchor_pairs=(anchor_pair,),
+    )
+    manual_score = score_heavy_atom_clashes(
+        scored_residue,
+        other=placement.nanoring,
+        ignored_atom_index_pairs=ignored_anchor_pairs,
+        ignore_same_residue=True,
+        ignore_inter_residue_backbone_n_c=True,
+    ).total_overlap_score
+    unfiltered_score = score_heavy_atom_clashes(
+        residue,
+        other=placement.nanoring,
+    ).total_overlap_score
+
+    assert np.isclose(placement_score, manual_score)
+    assert placement_score < unfiltered_score
+
+
 def test_nanoring_rotamer_ensemble_scores_secondary_structure_candidates() -> None:
     placement = place_bp5_rotamer_ensembles_around_nanoring(
         m=18,
@@ -222,6 +260,25 @@ def test_nanoring_rotamer_ensemble_scores_secondary_structure_candidates() -> No
             np.linalg.norm(candidate.orientation_metrics.c_terminal_exit_vector),
             1.0,
         )
+
+
+def test_default_secondary_structure_clash_cutoff_filters_high_overlap_states() -> None:
+    placement = place_bp5_rotamer_ensembles_around_nanoring(
+        m=18,
+        cif_path=Path("data/rcsb/BP5.cif"),
+        secondary_structure="alpha_helix",
+    )
+
+    accepted_names = {
+        state.rotamer_name for state in placement.accepted_secondary_structure_states
+    }
+
+    assert len(placement.secondary_structure_states) == 6
+    assert accepted_names == {"gminus_p90", "gplus_m90", "gplus_p90", "trans_m90"}
+    assert all(
+        state.clash_score / len(state.candidates) <= 6.0
+        for state in placement.accepted_secondary_structure_states
+    )
 
 
 def test_secondary_structure_candidates_keep_symmetric_rotamer_states() -> None:

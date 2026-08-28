@@ -32,3 +32,59 @@ def test_heavy_atom_clash_score_ignores_bonded_pairs_and_hydrogens() -> None:
 
     assert score.passes
     assert score.total_overlap_score == 0.0
+
+
+def test_heavy_atom_clash_score_can_ignore_same_residue_pairs() -> None:
+    atoms = struc.AtomArray(2)
+    atoms.coord = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    atoms.chain_id = np.array(["A", "A"])
+    atoms.res_id = np.array([1, 1])
+    atoms.atom_name = np.array(["PD", "N1"])
+    atoms.element = np.array(["PD", "N"])
+
+    score = score_heavy_atom_clashes(atoms, ignore_same_residue=True)
+
+    assert score.passes
+    assert score.total_overlap_score == 0.0
+
+
+def test_heavy_atom_clash_score_can_ignore_specific_cross_array_index_pairs() -> None:
+    atoms = struc.AtomArray(1)
+    atoms.coord = np.array([[0.0, 0.0, 0.0]])
+    atoms.chain_id = np.array(["A"])
+    atoms.res_id = np.array([1])
+    atoms.atom_name = np.array(["PD"])
+    atoms.element = np.array(["PD"])
+    other = struc.AtomArray(2)
+    other.coord = np.array([[1.0, 0.0, 0.0], [1.1, 0.0, 0.0]])
+    other.chain_id = np.array(["B", "B"])
+    other.res_id = np.array([1, 1])
+    other.atom_name = np.array(["C1", "C2"])
+    other.element = np.array(["C", "C"])
+
+    score = score_heavy_atom_clashes(
+        atoms,
+        other=other,
+        ignored_atom_index_pairs=((0, 1),),
+    )
+
+    assert score.clashing_pair_count == 1
+    assert score.worst_pair is not None
+    assert score.worst_pair.atom_2 == "B:1:C1"
+
+
+def test_heavy_atom_clash_score_can_ignore_inter_residue_backbone_n_c_pairs() -> None:
+    atoms = struc.AtomArray(2)
+    atoms.coord = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    atoms.chain_id = np.array(["A", "A"])
+    atoms.res_id = np.array([1, 2])
+    atoms.atom_name = np.array(["C", "N"])
+    atoms.element = np.array(["C", "N"])
+
+    score = score_heavy_atom_clashes(
+        atoms,
+        ignore_inter_residue_backbone_n_c=True,
+    )
+
+    assert score.passes
+    assert score.total_overlap_score == 0.0

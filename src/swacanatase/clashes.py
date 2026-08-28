@@ -37,6 +37,9 @@ def score_heavy_atom_clashes(
     other: struc.AtomArray | None = None,
     bonded_atom_pairs: Iterable[tuple[str, str]] = (),
     ignored_atom_name_pairs: Iterable[tuple[str, str]] = (),
+    ignored_atom_index_pairs: Iterable[tuple[int, int]] = (),
+    ignore_same_residue: bool = False,
+    ignore_inter_residue_backbone_n_c: bool = False,
     heavy_atom_cutoff: float = DEFAULT_HEAVY_ATOM_CUTOFF,
     pd_cutoff: float = DEFAULT_PD_CUTOFF,
 ) -> ClashScore:
@@ -46,6 +49,9 @@ def score_heavy_atom_clashes(
         other=other,
         bonded_atom_pairs=bonded_atom_pairs,
         ignored_atom_name_pairs=ignored_atom_name_pairs,
+        ignored_atom_index_pairs=ignored_atom_index_pairs,
+        ignore_same_residue=ignore_same_residue,
+        ignore_inter_residue_backbone_n_c=ignore_inter_residue_backbone_n_c,
         heavy_atom_cutoff=heavy_atom_cutoff,
         pd_cutoff=pd_cutoff,
     )
@@ -70,24 +76,52 @@ def _clashing_pairs(
     other: struc.AtomArray | None,
     bonded_atom_pairs: Iterable[tuple[str, str]],
     ignored_atom_name_pairs: Iterable[tuple[str, str]],
+    ignored_atom_index_pairs: Iterable[tuple[int, int]],
+    ignore_same_residue: bool,
+    ignore_inter_residue_backbone_n_c: bool,
     heavy_atom_cutoff: float,
     pd_cutoff: float,
 ) -> list[ClashPair]:
     bonded_pairs = {frozenset(pair) for pair in bonded_atom_pairs}
     ignored_pairs = {frozenset(pair) for pair in ignored_atom_name_pairs}
+    ignored_within_indices = {frozenset(pair) for pair in ignored_atom_index_pairs}
+    ignored_between_indices = set(ignored_atom_index_pairs)
     pairs: list[ClashPair] = []
 
     if other is None:
         heavy_indices = _heavy_atom_indices(atom_array)
         for left_offset, index_1 in enumerate(heavy_indices[:-1]):
             for index_2 in heavy_indices[left_offset + 1 :]:
+                if frozenset((index_1, index_2)) in ignored_within_indices:
+                    continue
+                if ignore_same_residue and _same_residue(
+                    atom_array,
+                    index_1,
+                    atom_array,
+                    index_2,
+                ):
+                    continue
+                if ignore_inter_residue_backbone_n_c and _inter_residue_backbone_n_c(
+                    atom_array,
+                    index_1,
+                    atom_array,
+                    index_2,
+                ):
+                    continue
                 atom_name_1 = str(atom_array.atom_name[index_1])
                 atom_name_2 = str(atom_array.atom_name[index_2])
                 if frozenset((atom_name_1, atom_name_2)) in bonded_pairs:
                     continue
                 if frozenset((atom_name_1, atom_name_2)) in ignored_pairs:
                     continue
-                pair = _score_pair(atom_array, index_1, atom_array, index_2, heavy_atom_cutoff, pd_cutoff)
+                pair = _score_pair(
+                    atom_array,
+                    index_1,
+                    atom_array,
+                    index_2,
+                    heavy_atom_cutoff,
+                    pd_cutoff,
+                )
                 if pair is not None:
                     pairs.append(pair)
         return pairs
@@ -96,11 +130,34 @@ def _clashing_pairs(
     heavy_indices_2 = _heavy_atom_indices(other)
     for index_1 in heavy_indices_1:
         for index_2 in heavy_indices_2:
+            if (index_1, index_2) in ignored_between_indices:
+                continue
+            if ignore_same_residue and _same_residue(
+                atom_array,
+                index_1,
+                other,
+                index_2,
+            ):
+                continue
+            if ignore_inter_residue_backbone_n_c and _inter_residue_backbone_n_c(
+                atom_array,
+                index_1,
+                other,
+                index_2,
+            ):
+                continue
             atom_name_1 = str(atom_array.atom_name[index_1])
             atom_name_2 = str(other.atom_name[index_2])
             if frozenset((atom_name_1, atom_name_2)) in ignored_pairs:
                 continue
-            pair = _score_pair(atom_array, index_1, other, index_2, heavy_atom_cutoff, pd_cutoff)
+            pair = _score_pair(
+                atom_array,
+                index_1,
+                other,
+                index_2,
+                heavy_atom_cutoff,
+                pd_cutoff,
+            )
             if pair is not None:
                 pairs.append(pair)
     return pairs
@@ -133,6 +190,33 @@ def _score_pair(
 def _heavy_atom_indices(atom_array: struc.AtomArray) -> np.ndarray:
     elements = np.char.upper(atom_array.element.astype("U2"))
     return np.flatnonzero((elements != "H") & (elements != "D"))
+
+
+def _same_residue(
+    atom_array: struc.AtomArray,
+    index: int,
+    other: struc.AtomArray,
+    other_index: int,
+) -> bool:
+    return bool(
+        atom_array.chain_id[index] == other.chain_id[other_index]
+        and atom_array.res_id[index] == other.res_id[other_index]
+    )
+
+
+def _inter_residue_backbone_n_c(
+    atom_array: struc.AtomArray,
+    index: int,
+    other: struc.AtomArray,
+    other_index: int,
+) -> bool:
+    atom_names = {
+        str(atom_array.atom_name[index]),
+        str(other.atom_name[other_index]),
+    }
+    if atom_names != {"N", "C"}:
+        return False
+    return not _same_residue(atom_array, index, other, other_index)
 
 
 def _atom_label(atom_array: struc.AtomArray, index: int) -> str:

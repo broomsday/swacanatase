@@ -182,7 +182,12 @@ def score_secondary_structure_segment_clashes(
     backbone = _backbone_atoms(segment.atom_array)
     generated_backbone = _generated_backbone_atoms(segment)
     scaffold_score = (
-        score_heavy_atom_clashes(backbone, other=nanoring).total_overlap_score
+        score_heavy_atom_clashes(
+            backbone,
+            other=nanoring,
+            ignore_same_residue=True,
+            ignore_inter_residue_backbone_n_c=True,
+        ).total_overlap_score
         if nanoring is not None
         else 0.0
     )
@@ -190,6 +195,8 @@ def score_secondary_structure_segment_clashes(
         score_heavy_atom_clashes(
             generated_backbone,
             other=bp5_context,
+            ignore_same_residue=True,
+            ignore_inter_residue_backbone_n_c=True,
         ).total_overlap_score
         if bp5_context is not None
         else 0.0
@@ -199,6 +206,8 @@ def score_secondary_structure_segment_clashes(
             score_heavy_atom_clashes(
                 backbone,
                 other=_backbone_atoms(neighboring_segment.atom_array),
+                ignore_same_residue=True,
+                ignore_inter_residue_backbone_n_c=True,
             ).total_overlap_score
             for neighboring_segment in neighboring_segments
         )

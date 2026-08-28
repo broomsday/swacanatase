@@ -125,8 +125,19 @@ Use `--write-reports` to persist score tables and run metadata under
 `data/generated/reports/`. Use `--scan-limit N` for early tests; it scans only
 the first `N` deterministic BP5 chi-rotamer states and grows at most the first
 `N` selected secondary-structure states.
-Secondary-structure growth defaults to two residues before and two residues
+Secondary-structure growth defaults to three residues before and three residues
 after BP5; override with `--residues-before` and `--residues-after` when needed.
+
+Rotamer and secondary-structure states are clash-filtered by default using a
+total-overlap cutoff of `6.0` Angstrom per placed BP5 site. The raw state score
+is the sum of all heavy-atom distance deficits, where organic heavy atoms closer
+than `2.2` Angstrom and Pd-involving pairs closer than `1.8` Angstrom contribute
+`cutoff - distance`. The placement score ignores intra-residue pairs, virtual
+`CV1`/`CV2` atoms, Pd contacts to the two intended scaffold anchor carbons, and
+inter-residue backbone `N`/`C` pairs. Reports include both total and per-site
+scores. Override with `--rotamer-clash-cutoff` or
+`--secondary-structure-clash-cutoff`; use `--no-clash-cutoffs` for fully
+unfiltered exploratory output.
 
 Report outputs:
 
