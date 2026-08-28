@@ -13,6 +13,7 @@ from swacanatase.secondary_structure import (
     N_CA_C_ANGLE_DEGREES,
     SECONDARY_STRUCTURE_TARGETS,
     build_regular_secondary_structure_segment,
+    measure_secondary_structure_orientation,
     score_secondary_structure_segment_clashes,
 )
 
@@ -130,6 +131,43 @@ def test_neighboring_secondary_structure_backbone_clashes_are_scored() -> None:
     assert not score.passes
 
 
+def test_secondary_structure_orientation_reports_frame_and_exit_vectors() -> None:
+    segment = build_regular_secondary_structure_segment(
+        _first_bp5_rotamer(),
+        secondary_structure_type="alpha_helix",
+        residues_before=2,
+        residues_after=2,
+    )
+
+    metrics = measure_secondary_structure_orientation(
+        segment,
+        radial_direction=np.array([1.0, 0.0, 0.0]),
+        tangential_direction=np.array([0.0, 1.0, 0.0]),
+        ring_axis=np.array([0.0, 0.0, 1.0]),
+    )
+    bp5_residue = _residue(segment.atom_array, segment.bp5_residue_id)
+    n_terminal_residue = _residue(segment.atom_array, 1)
+    c_terminal_residue = _residue(segment.atom_array, 5)
+    expected_n_exit = _unit(
+        _atom_coord(n_terminal_residue, "CA") - _atom_coord(bp5_residue, "CA")
+    )
+    expected_c_exit = _unit(
+        _atom_coord(c_terminal_residue, "CA") - _atom_coord(bp5_residue, "CA")
+    )
+
+    assert np.isclose(np.linalg.norm(metrics.secondary_structure_direction), 1.0)
+    assert np.isclose(np.linalg.norm(metrics.n_terminal_exit_vector), 1.0)
+    assert np.isclose(np.linalg.norm(metrics.c_terminal_exit_vector), 1.0)
+    assert np.isclose(
+        metrics.radial_alignment**2
+        + metrics.tangential_alignment**2
+        + metrics.axial_alignment**2,
+        1.0,
+    )
+    assert np.allclose(metrics.n_terminal_exit_vector, expected_n_exit)
+    assert np.allclose(metrics.c_terminal_exit_vector, expected_c_exit)
+
+
 def _first_bp5_rotamer():
     placement = place_bp5_sidechains_around_nanoring(
         m=18,
@@ -188,6 +226,10 @@ def _angle_close(actual: float, expected: float, atol: float = 1e-4) -> bool:
 
 def _atom_index(atom_array, atom_name: str) -> int:
     return atom_array.atom_name.tolist().index(atom_name)
+
+
+def _atom_coord(atom_array, atom_name: str) -> np.ndarray:
+    return atom_array.coord[_atom_index(atom_array, atom_name)]
 
 
 def _unit(vector: np.ndarray) -> np.ndarray:

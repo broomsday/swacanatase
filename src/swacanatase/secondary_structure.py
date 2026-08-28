@@ -60,6 +60,16 @@ class SecondaryStructureClashScore:
         return self.total_overlap_score == 0.0
 
 
+@dataclass(frozen=True)
+class SecondaryStructureOrientationMetrics:
+    secondary_structure_direction: np.ndarray
+    radial_alignment: float
+    tangential_alignment: float
+    axial_alignment: float
+    n_terminal_exit_vector: np.ndarray
+    c_terminal_exit_vector: np.ndarray
+
+
 SECONDARY_STRUCTURE_TARGETS: dict[SecondaryStructureType, BackboneTorsionTargets] = {
     "alpha_helix": BackboneTorsionTargets(phi_degrees=-60.0, psi_degrees=-45.0),
     "beta_strand": BackboneTorsionTargets(phi_degrees=-135.0, psi_degrees=135.0),
@@ -181,6 +191,30 @@ def score_secondary_structure_segment_clashes(
         scaffold_score=float(scaffold_score),
         bp5_score=float(bp5_score),
         neighboring_backbone_score=neighboring_backbone_score,
+    )
+
+
+def measure_secondary_structure_orientation(
+    segment: SecondaryStructureSegment,
+    radial_direction: np.ndarray,
+    tangential_direction: np.ndarray,
+    ring_axis: np.ndarray,
+) -> SecondaryStructureOrientationMetrics:
+    """Measure segment and terminal-exit directions in a nanoring anchor frame."""
+    secondary_structure_direction = _secondary_structure_direction(segment)
+    radial_axis = _unit(np.asarray(radial_direction, dtype=float))
+    tangential_axis = _unit(np.asarray(tangential_direction, dtype=float))
+    axial_axis = _unit(np.asarray(ring_axis, dtype=float))
+    n_terminal_exit_vector, c_terminal_exit_vector = _terminal_exit_vectors(segment)
+    return SecondaryStructureOrientationMetrics(
+        secondary_structure_direction=secondary_structure_direction,
+        radial_alignment=float(np.dot(secondary_structure_direction, radial_axis)),
+        tangential_alignment=float(
+            np.dot(secondary_structure_direction, tangential_axis)
+        ),
+        axial_alignment=float(np.dot(secondary_structure_direction, axial_axis)),
+        n_terminal_exit_vector=n_terminal_exit_vector,
+        c_terminal_exit_vector=c_terminal_exit_vector,
     )
 
 
@@ -367,6 +401,69 @@ def _generated_backbone_atoms(segment: SecondaryStructureSegment) -> struc.AtomA
         (atom_array.res_id != segment.bp5_residue_id)
         & np.isin(atom_array.atom_name, list(BACKBONE_ATOM_NAMES))
     ]
+
+
+def _secondary_structure_direction(
+    segment: SecondaryStructureSegment,
+) -> np.ndarray:
+    residue_ids = _sorted_residue_ids(segment.atom_array)
+    ca_coords = np.array(
+        [
+            _atom_coord(_residue(segment.atom_array, residue_id), "CA")
+            for residue_id in residue_ids
+        ],
+        dtype=float,
+    )
+    if ca_coords.shape[0] == 1:
+        bp5_residue = _residue(segment.atom_array, segment.bp5_residue_id)
+        return _unit(_atom_coord(bp5_residue, "C") - _atom_coord(bp5_residue, "N"))
+
+    terminal_delta = ca_coords[-1] - ca_coords[0]
+    if ca_coords.shape[0] == 2:
+        return _unit(terminal_delta)
+
+    centered = ca_coords - ca_coords.mean(axis=0)
+    _, singular_values, right_singular_vectors = np.linalg.svd(
+        centered,
+        full_matrices=False,
+    )
+    if np.isclose(float(singular_values[0]), 0.0):
+        return _unit(terminal_delta)
+
+    direction = _unit(right_singular_vectors[0])
+    if np.dot(direction, terminal_delta) < 0.0:
+        direction = -direction
+    return direction
+
+
+def _terminal_exit_vectors(
+    segment: SecondaryStructureSegment,
+) -> tuple[np.ndarray, np.ndarray]:
+    residue_ids = _sorted_residue_ids(segment.atom_array)
+    bp5_residue = _residue(segment.atom_array, segment.bp5_residue_id)
+    bp5_ca = _atom_coord(bp5_residue, "CA")
+
+    n_terminal_residue = _residue(segment.atom_array, residue_ids[0])
+    if residue_ids[0] == segment.bp5_residue_id:
+        n_terminal_exit_vector = _unit(_atom_coord(bp5_residue, "N") - bp5_ca)
+    else:
+        n_terminal_exit_vector = _unit(_atom_coord(n_terminal_residue, "CA") - bp5_ca)
+
+    c_terminal_residue = _residue(segment.atom_array, residue_ids[-1])
+    if residue_ids[-1] == segment.bp5_residue_id:
+        c_terminal_exit_vector = _unit(_atom_coord(bp5_residue, "C") - bp5_ca)
+    else:
+        c_terminal_exit_vector = _unit(_atom_coord(c_terminal_residue, "CA") - bp5_ca)
+
+    return n_terminal_exit_vector, c_terminal_exit_vector
+
+
+def _sorted_residue_ids(atom_array: struc.AtomArray) -> tuple[int, ...]:
+    return tuple(sorted({int(residue_id) for residue_id in atom_array.res_id.tolist()}))
+
+
+def _residue(atom_array: struc.AtomArray, residue_id: int) -> struc.AtomArray:
+    return atom_array[atom_array.res_id == residue_id]
 
 
 def _require_atom_names(atom_array: struc.AtomArray, atom_names: tuple[str, ...]) -> None:

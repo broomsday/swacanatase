@@ -213,7 +213,8 @@ Initial output fields:
 
 ## Secondary-Structure Growth
 
-Status: Complete for the first implementation pass.
+Status: Complete for the first implementation pass, including post-growth clash
+scoring and orientation metrics.
 
 Only after BP5 rotamer candidates are generated and filtered should regular
 secondary structure be attached.
@@ -242,14 +243,14 @@ For internal protein segments, replace terminal-only BP5 atoms as needed:
 - normalize terminal hydrogens in generated peptides rather than preserving CCD
   terminal annotations blindly
 
-Secondary-structure candidates should be scored after growth, not before:
+Secondary-structure candidates are scored and measured after growth, not before:
 
-- backbone-scaffold clashes
-- backbone-BP5 clashes
-- backbone-backbone clashes between neighboring BP5 sites
-- helix axis or strand direction relative to nanoring radial/tangential/axial
+- [x] backbone-scaffold clashes
+- [x] backbone-BP5 clashes
+- [x] backbone-backbone clashes between neighboring BP5 sites
+- [x] helix axis or strand direction relative to nanoring radial/tangential/axial
   frames
-- N-terminal and C-terminal exit vectors
+- [x] N-terminal and C-terminal exit vectors
 
 ## Testing Plan
 
@@ -291,6 +292,8 @@ Secondary-structure tests:
   growth.
 - [x] Post-growth clash scoring reports scaffold, BP5-context, and neighboring
   candidate-backbone components.
+- [x] Post-growth orientation metrics report segment direction, anchor-frame
+  alignment, and terminal exit vectors.
 
 ## CLI And Output Plan
 

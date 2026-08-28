@@ -46,8 +46,10 @@ from .secondary_structure import (
     SECONDARY_STRUCTURE_TARGETS,
     BackboneTorsionTargets,
     SecondaryStructureClashScore,
+    SecondaryStructureOrientationMetrics,
     SecondaryStructureSegment,
     build_regular_secondary_structure_segment,
+    measure_secondary_structure_orientation,
     score_secondary_structure_segment_clashes,
 )
 
@@ -72,6 +74,7 @@ __all__ = [
     "BackboneTorsionTargets",
     "SecondaryStructureSegment",
     "SecondaryStructureClashScore",
+    "SecondaryStructureOrientationMetrics",
     "SquarePlanarGeometry",
     "append_square_planar_palladium_site",
     "central_inter_benzene_linker_anchor_pairs",
@@ -90,6 +93,7 @@ __all__ = [
     "load_chemical_component_atom_array",
     "load_chemical_component_bond_pairs",
     "make_bp5_active_conformer",
+    "measure_secondary_structure_orientation",
     "place_bp5_rotamer_ensembles_around_nanoring",
     "place_bp5_sidechains_around_nanoring",
     "score_secondary_structure_segment_clashes",

@@ -16,9 +16,11 @@ from .clashes import score_heavy_atom_clashes
 from .ligands import DEFAULT_LIGAND_DIR, load_bp5_bond_pairs
 from .nanoring import generate_armchair_nanoring
 from .secondary_structure import (
+    SecondaryStructureOrientationMetrics,
     SecondaryStructureType,
     SecondaryStructureSegment,
     build_regular_secondary_structure_segment,
+    measure_secondary_structure_orientation,
     score_secondary_structure_segment_clashes,
 )
 
@@ -85,10 +87,35 @@ class BP5SecondaryStructurePlacement:
 
     rotamer_candidate: BP5RotamerPlacement
     segment: SecondaryStructureSegment
+    orientation_metrics: SecondaryStructureOrientationMetrics
     scaffold_clash_score: float
     bp5_clash_score: float
     neighboring_backbone_clash_score: float
     clash_score: float
+
+    @property
+    def secondary_structure_direction(self) -> np.ndarray:
+        return self.orientation_metrics.secondary_structure_direction
+
+    @property
+    def radial_alignment(self) -> float:
+        return self.orientation_metrics.radial_alignment
+
+    @property
+    def tangential_alignment(self) -> float:
+        return self.orientation_metrics.tangential_alignment
+
+    @property
+    def axial_alignment(self) -> float:
+        return self.orientation_metrics.axial_alignment
+
+    @property
+    def n_terminal_exit_vector(self) -> np.ndarray:
+        return self.orientation_metrics.n_terminal_exit_vector
+
+    @property
+    def c_terminal_exit_vector(self) -> np.ndarray:
+        return self.orientation_metrics.c_terminal_exit_vector
 
 
 @dataclass(frozen=True)
@@ -384,6 +411,7 @@ def place_bp5_rotamer_ensembles_around_nanoring(
             rotamer_candidates=tuple(accepted),
             nanoring=rigid_placement.nanoring,
             rigid_sidechains=rigid_placement.sidechains,
+            anchor_pairs=rigid_placement.anchor_pairs,
             secondary_structure=secondary_structure,
             residues_before=residues_before,
             residues_after=residues_after,
@@ -534,6 +562,7 @@ def _build_secondary_structure_candidates(
     rotamer_candidates: tuple[BP5RotamerPlacement, ...],
     nanoring: struc.AtomArray,
     rigid_sidechains: struc.AtomArray,
+    anchor_pairs: tuple[NanoringAnchorPair, ...],
     secondary_structure: SecondaryStructureType,
     residues_before: int,
     residues_after: int,
@@ -570,10 +599,18 @@ def _build_secondary_structure_candidates(
             bp5_context=bp5_context,
             neighboring_segments=neighboring_segments,
         )
+        anchor_pair = anchor_pairs[candidate.residue_id - 1]
+        orientation_metrics = measure_secondary_structure_orientation(
+            segment=segment,
+            radial_direction=anchor_pair.radial_direction,
+            tangential_direction=anchor_pair.tangential_direction,
+            ring_axis=anchor_pair.ring_axis,
+        )
         scored_candidates.append(
             BP5SecondaryStructurePlacement(
                 rotamer_candidate=candidate,
                 segment=segment,
+                orientation_metrics=orientation_metrics,
                 scaffold_clash_score=score.scaffold_score,
                 bp5_clash_score=score.bp5_score,
                 neighboring_backbone_clash_score=score.neighboring_backbone_score,

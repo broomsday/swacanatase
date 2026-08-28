@@ -119,6 +119,24 @@ def test_nanoring_rotamer_ensemble_scores_secondary_structure_candidates() -> No
             + candidate.bp5_clash_score
             + candidate.neighboring_backbone_clash_score,
         )
+        assert np.isclose(
+            np.linalg.norm(
+                candidate.orientation_metrics.secondary_structure_direction
+            ),
+            1.0,
+        )
+        assert np.allclose(
+            candidate.secondary_structure_direction,
+            candidate.orientation_metrics.secondary_structure_direction,
+        )
+        assert np.isclose(
+            np.linalg.norm(candidate.orientation_metrics.n_terminal_exit_vector),
+            1.0,
+        )
+        assert np.isclose(
+            np.linalg.norm(candidate.orientation_metrics.c_terminal_exit_vector),
+            1.0,
+        )
 
 
 def _coords_by_name(atom_array, atom_names: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
