@@ -121,27 +121,29 @@ RAMACHANDRAN_FAVORED = 2
 
 # First-pass analytic scan windows around ideal alpha/beta centers. These are
 # intentionally sparse and replaceable with residue-class density grids such as
-# MolProbity/Top500 ``rama500-*.data`` files if those are hydrated locally later.
+# MolProbity/Top8000 ``rama8000-*.data`` files if those are hydrated locally
+# later. Radii are kept conservative so favored scans avoid the low-density
+# tails admitted by broad validation contours.
 RAMACHANDRAN_BASINS: dict[SecondaryStructureType, RamachandranBasin] = {
     "alpha_helix": RamachandranBasin(
         secondary_structure_type="alpha_helix",
         name="alpha_r",
         center_phi_degrees=-60.0,
         center_psi_degrees=-45.0,
-        favored_phi_radius_degrees=20.0,
-        favored_psi_radius_degrees=25.0,
-        allowed_phi_radius_degrees=35.0,
-        allowed_psi_radius_degrees=40.0,
+        favored_phi_radius_degrees=15.0,
+        favored_psi_radius_degrees=15.0,
+        allowed_phi_radius_degrees=25.0,
+        allowed_psi_radius_degrees=30.0,
     ),
     "beta_strand": RamachandranBasin(
         secondary_structure_type="beta_strand",
         name="beta",
         center_phi_degrees=-135.0,
         center_psi_degrees=135.0,
-        favored_phi_radius_degrees=35.0,
+        favored_phi_radius_degrees=30.0,
         favored_psi_radius_degrees=30.0,
-        allowed_phi_radius_degrees=55.0,
-        allowed_psi_radius_degrees=45.0,
+        allowed_phi_radius_degrees=45.0,
+        allowed_psi_radius_degrees=40.0,
     ),
 }
 

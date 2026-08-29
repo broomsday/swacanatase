@@ -120,6 +120,24 @@ def test_phi_psi_scan_matrix_is_sparse_on_a_5_degree_grid() -> None:
     assert np.count_nonzero(matrix) < matrix.size / 5
 
 
+def test_phi_psi_scan_matrix_uses_conservative_favored_cores() -> None:
+    grid_values = phi_psi_grid_values(step_degrees=5.0)
+    grid_index = {value: index for index, value in enumerate(grid_values.tolist())}
+    alpha_matrix = secondary_structure_phi_psi_scan_matrix(
+        "alpha_helix",
+        step_degrees=5.0,
+    )
+    beta_matrix = secondary_structure_phi_psi_scan_matrix(
+        "beta_strand",
+        step_degrees=5.0,
+    )
+
+    assert np.count_nonzero(alpha_matrix == RAMACHANDRAN_FAVORED) == 29
+    assert np.count_nonzero(beta_matrix == RAMACHANDRAN_FAVORED) == 113
+    assert alpha_matrix[grid_index[-60.0], grid_index[-70.0]] == RAMACHANDRAN_ALLOWED
+    assert beta_matrix[grid_index[-170.0], grid_index[135.0]] == RAMACHANDRAN_ALLOWED
+
+
 def test_phi_psi_scan_targets_are_ordered_from_ideal_center_outward() -> None:
     targets = secondary_structure_phi_psi_scan_targets(
         "beta_strand",

@@ -150,10 +150,10 @@ By default, `--secondary-structure alpha_helix` and
 `--secondary-structure beta_strand` grow a single ideal phi/psi target. Add
 `--secondary-structure-phi-psi-step 5` to scan a sparse 5-degree
 first-pass Ramachandran-basin approximation around the ideal target instead.
-The scan keeps only favored basin points by default; use
-`--secondary-structure-ramachandran-level allowed` to include the wider allowed
-basin. Reports include `phi_degrees`, `psi_degrees`, `phi_psi_label`, and
-`ramachandran_level`.
+The scan keeps only conservative favored-core basin points by default; use
+`--secondary-structure-ramachandran-level allowed` to include the wider
+exploratory basin. Reports include `phi_degrees`, `psi_degrees`,
+`phi_psi_label`, and `ramachandran_level`.
 
 Report outputs:
 
