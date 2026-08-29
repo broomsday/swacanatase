@@ -335,9 +335,9 @@ def test_write_bp5_nanoring_series_defaults_to_three_residue_segment_context(
     assert secondary_structure_paths[0].name.endswith("_alpha_helix_pre3_post3.cif")
     assert metadata["residues_before"] == 3
     assert metadata["residues_after"] == 3
-    assert metadata["rotamer_clash_cutoff"] == 6.0
+    assert metadata["rotamer_clash_cutoff"] == 3.0
     assert metadata["rotamer_clash_cutoff_unit"] == "total_overlap_per_bp5_site"
-    assert metadata["secondary_structure_clash_cutoff"] == 6.0
+    assert metadata["secondary_structure_clash_cutoff"] == 3.0
     assert (
         metadata["secondary_structure_clash_cutoff_unit"]
         == "total_overlap_per_bp5_site"

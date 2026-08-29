@@ -307,9 +307,9 @@ def test_default_secondary_structure_clash_cutoff_filters_high_overlap_states() 
     }
 
     assert len(placement.secondary_structure_states) == 6
-    assert accepted_names == {"gminus_p90", "gplus_m90", "trans_m90"}
+    assert accepted_names == {"gminus_p90", "trans_m90"}
     assert all(
-        state.clash_score / len(state.candidates) <= 6.0
+        state.clash_score / len(state.candidates) <= 3.0
         for state in placement.accepted_secondary_structure_states
     )
     assert all(
@@ -323,6 +323,7 @@ def test_secondary_structure_cylinder_filter_can_be_disabled() -> None:
         m=18,
         cif_path=Path("data/rcsb/BP5.cif"),
         secondary_structure="alpha_helix",
+        secondary_structure_clash_cutoff=6.0,
         secondary_structure_cylinder_filter=False,
     )
 
