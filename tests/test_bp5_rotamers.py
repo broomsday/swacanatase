@@ -309,7 +309,7 @@ def test_default_secondary_structure_clash_cutoff_filters_high_overlap_states() 
     assert len(placement.secondary_structure_states) == 6
     assert accepted_names == {"gminus_p90", "trans_m90"}
     assert all(
-        state.clash_score / len(state.candidates) <= 3.0
+        state.clash_score / len(state.candidates) <= 2.0
         for state in placement.accepted_secondary_structure_states
     )
     assert all(

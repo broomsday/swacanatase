@@ -129,7 +129,7 @@ Secondary-structure growth defaults to three residues before and three residues
 after BP5; override with `--residues-before` and `--residues-after` when needed.
 
 Rotamer and secondary-structure states are clash-filtered by default using a
-total-overlap cutoff of `3.0` Angstrom per placed BP5 site. The raw state score
+total-overlap cutoff of `2.0` Angstrom per placed BP5 site. The raw state score
 is the sum of all heavy-atom distance deficits, where organic heavy atoms closer
 than `2.2` Angstrom and Pd-involving pairs closer than `1.8` Angstrom contribute
 `cutoff - distance`. The placement score ignores intra-residue pairs, virtual
