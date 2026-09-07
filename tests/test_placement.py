@@ -442,13 +442,16 @@ def test_turn_motif_cli_writes_outputs_and_report(tmp_path: Path) -> None:
     assert len(rows) == 9
     assert {row["motif_type"] for row in rows} == {"beta_turn_ad"}
     assert {row["bp5_motif_offset"] for row in rows} == {"2"}
-    assert {row["turn_phi_psi_r2"] for row in rows} == {"-60.0,-30.0"}
+    assert {row["turn_torsion_source"] for row in rows} == {"mode"}
+    assert {row["turn_torsion_variant"] for row in rows} == {"mode"}
+    assert {row["turn_phi_psi_r2"] for row in rows} == {"-62.25,-23.48"}
     assert metadata["turn_motifs"] == ["beta_turn_ad"]
+    assert metadata["turn_motif_torsion_source"] == "mode"
     assert metadata["summaries"][0]["turn_motif_states_scanned"] == 1
 
 
-def test_cis_turns_are_rejected_until_supported(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="omega and residue identity constraints"):
+def test_cis_turns_must_be_explicitly_enabled(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="--include-cis-turns"):
         placement_main(
             [
                 "--m",
@@ -456,10 +459,75 @@ def test_cis_turns_are_rejected_until_supported(tmp_path: Path) -> None:
                 "--output-dir",
                 str(tmp_path),
                 "--turn-motif",
-                "beta_turn_ad",
-                "--include-cis-turns",
+                "beta_turn_pcis_d",
             ]
         )
+
+
+def test_cis_turn_cli_writes_outputs_when_enabled(tmp_path: Path) -> None:
+    exit_code = placement_main(
+        [
+            "--m",
+            "18",
+            "--output-dir",
+            str(tmp_path),
+            "--overwrite",
+            "--write-reports",
+            "--scan-limit",
+            "1",
+            "--max-rotamers-per-site",
+            "1",
+            "--no-clash-cutoffs",
+            "--turn-motif",
+            "beta_turn_pcis_d",
+            "--include-cis-turns",
+            "--allow-secondary-structure-cylinder-intrusions",
+        ]
+    )
+
+    assert exit_code == 0
+    with (tmp_path / "reports" / "turn_motif_scores.csv").open(newline="") as file:
+        rows = list(csv.DictReader(file))
+
+    assert len(rows) == 9
+    assert {row["motif_type"] for row in rows} == {"beta_turn_pcis_d"}
+    assert {row["turn_requires_cis_peptide"] for row in rows} == {"True"}
+
+
+def test_turn_motif_cli_can_scan_medoid_perturbations(tmp_path: Path) -> None:
+    exit_code = placement_main(
+        [
+            "--m",
+            "18",
+            "--output-dir",
+            str(tmp_path),
+            "--overwrite",
+            "--write-reports",
+            "--scan-limit",
+            "3",
+            "--max-rotamers-per-site",
+            "1",
+            "--no-clash-cutoffs",
+            "--turn-motif",
+            "beta_turn_ad",
+            "--turn-motif-torsions",
+            "medoid",
+            "--turn-motif-perturbation-step",
+            "5",
+            "--turn-motif-perturbation-radius",
+            "5",
+            "--allow-secondary-structure-cylinder-intrusions",
+        ]
+    )
+
+    assert exit_code == 0
+    with (tmp_path / "reports" / "turn_motif_scores.csv").open(newline="") as file:
+        rows = list(csv.DictReader(file))
+
+    assert len(rows) == 27
+    assert {row["motif_type"] for row in rows} == {"beta_turn_ad"}
+    assert {row["turn_torsion_source"] for row in rows} == {"medoid"}
+    assert len({row["turn_torsion_variant"] for row in rows}) > 1
 
 
 def _atom_coord(atom_array, atom_name: str) -> np.ndarray:

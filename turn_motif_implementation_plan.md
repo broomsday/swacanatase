@@ -11,16 +11,21 @@ filters.
 
 ## Implementation Status
 
-Complete for the first implementation segment:
+Complete:
 
 - Phase 1: static motif library and turn builder.
 - Phase 2: placement integration and reuse of existing clash/cylinder scoring.
 - Phase 3: CLI, generated turn outputs, `turn_motif_scores.csv`, and metadata.
+- Phase 4: BetaTurnLib18 18-cluster mode/medoid values, deterministic
+  phi/psi perturbation scans, and opt-in cis-Pro motif support with non-trans
+  omega and fixed Pro residue labels.
 - Acceptance tests 1-7.
 
-Pending:
+No pending implementation items remain for this plan.
 
-- Phase 4 motif refinement, perturbation scans, and full cis-Pro turn support.
+Future extension: chemically complete Pro sidechain construction for fixed-Pro
+cis motifs. The current Phase 4 support fixes residue identity and peptide
+omega but emits backbone-only generated Pro residues.
 
 ## Background
 
@@ -253,10 +258,9 @@ Add focused tests before broad generated-output tests:
    - Run the placement CLI with `--turn-motif beta_turn_ad --scan-limit 1`.
    - Assert a turn output directory and `turn_motif_scores.csv` are created.
 
-7. `test_cis_turns_are_rejected_until_supported`
-   - Request a cis-Pro motif.
-   - Assert the error tells the user omega/residue constraints are not yet
-     implemented.
+7. `test_cis_turns_must_be_explicitly_enabled`
+   - Request a cis-Pro motif without the opt-in flag.
+   - Assert the error tells the user to pass `--include-cis-turns`.
 
 ## Implementation Phases
 

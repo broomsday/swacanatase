@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from itertools import product
 from typing import Literal
 
 import biotite.structure as struc
@@ -21,10 +22,20 @@ TurnMotifType = Literal[
     "beta_turn_ab2",
     "beta_turn_az",
     "beta_turn_ag",
+    "beta_turn_bcis_p",
+    "beta_turn_d_d",
+    "beta_turn_pcis_d",
+    "beta_turn_dn",
+    "beta_turn_dd",
+    "beta_turn_pcis_p",
+    "beta_turn_cis_da",
+    "beta_turn_pg",
+    "beta_turn_cis_dp",
     "gamma_turn_inverse",
     "gamma_turn_classic",
 ]
 RamachandranLevel = Literal["favored", "allowed"]
+TurnMotifTorsionSource = Literal["mode", "medoid"]
 
 BACKBONE_ATOM_NAMES = ("N", "CA", "C", "O")
 BP5_TERMINAL_ATOM_NAMES = ("H", "H2", "OXT", "HXT")
@@ -74,6 +85,11 @@ class TurnMotifDefinition:
     previous_name: str | None = None
     source: str = "classical"
     requires_cis_peptide: bool = False
+    fixed_residue_names: tuple[tuple[int, str], ...] = ()
+    torsion_source: TurnMotifTorsionSource = "mode"
+    torsion_variant_label: str = "mode"
+    mode_residue_torsions: tuple[ResidueTorsionTargets, ...] = ()
+    medoid_residue_torsions: tuple[ResidueTorsionTargets, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -157,6 +173,67 @@ SECONDARY_STRUCTURE_TARGETS: dict[SecondaryStructureType, BackboneTorsionTargets
     "beta_strand": BackboneTorsionTargets(phi_degrees=-135.0, psi_degrees=135.0),
 }
 
+
+def _beta_turn_residue_torsions(
+    omega2_degrees: float,
+    phi2_degrees: float,
+    psi2_degrees: float,
+    omega3_degrees: float,
+    phi3_degrees: float,
+    psi3_degrees: float,
+    omega4_degrees: float,
+) -> tuple[ResidueTorsionTargets, ...]:
+    return (
+        ResidueTorsionTargets(
+            1,
+            None,
+            None,
+            omega_after_degrees=omega2_degrees,
+        ),
+        ResidueTorsionTargets(
+            2,
+            phi2_degrees,
+            psi2_degrees,
+            omega_after_degrees=omega3_degrees,
+        ),
+        ResidueTorsionTargets(
+            3,
+            phi3_degrees,
+            psi3_degrees,
+            omega_after_degrees=omega4_degrees,
+        ),
+    )
+
+
+def _beta_turn_definition(
+    motif_type: TurnMotifType,
+    label: str,
+    previous_name: str,
+    central_bp5_offsets: tuple[int, ...],
+    mode_values: tuple[float, float, float, float, float, float, float],
+    medoid_values: tuple[float, float, float, float, float, float, float],
+    fixed_residue_names: tuple[tuple[int, str], ...] = (),
+    requires_cis_peptide: bool = False,
+) -> TurnMotifDefinition:
+    mode_torsions = _beta_turn_residue_torsions(*mode_values)
+    medoid_torsions = _beta_turn_residue_torsions(*medoid_values)
+    return TurnMotifDefinition(
+        motif_type=motif_type,
+        length=4,
+        central_bp5_offsets=central_bp5_offsets,
+        residue_torsions=mode_torsions,
+        label=label,
+        previous_name=previous_name,
+        source="BetaTurnLib18 v1.1",
+        requires_cis_peptide=requires_cis_peptide,
+        fixed_residue_names=fixed_residue_names,
+        torsion_source="mode",
+        torsion_variant_label="mode",
+        mode_residue_torsions=mode_torsions,
+        medoid_residue_torsions=medoid_torsions,
+    )
+
+
 DEFAULT_TURN_MOTIF_TYPES: tuple[TurnMotifType, ...] = (
     "beta_turn_ad",
     "beta_turn_ab1",
@@ -164,124 +241,177 @@ DEFAULT_TURN_MOTIF_TYPES: tuple[TurnMotifType, ...] = (
     "gamma_turn_inverse",
 )
 TURN_MOTIF_DEFINITIONS: dict[TurnMotifType, TurnMotifDefinition] = {
-    "beta_turn_ad": TurnMotifDefinition(
-        motif_type="beta_turn_ad",
-        length=4,
-        central_bp5_offsets=(2, 3),
-        residue_torsions=(
-            ResidueTorsionTargets(2, -60.0, -30.0),
-            ResidueTorsionTargets(3, -90.0, 0.0),
+    definition.motif_type: definition
+    for definition in (
+        _beta_turn_definition(
+            "beta_turn_ad",
+            "AD beta turn",
+            "I",
+            (2, 3),
+            (185.12, -62.25, -23.48, 181.88, -96.25, -2.44, 179.02),
+            (184.88, -65.27, -23.52, 182.83, -98.73, -18.06, 181.10),
         ),
-        label="AD beta turn",
-        previous_name="Type I",
-    ),
-    "beta_turn_pd": TurnMotifDefinition(
-        motif_type="beta_turn_pd",
-        length=4,
-        central_bp5_offsets=(2,),
-        residue_torsions=(
-            ResidueTorsionTargets(2, -60.0, 120.0),
-            ResidueTorsionTargets(3, 80.0, 0.0),
+        _beta_turn_definition(
+            "beta_turn_pd",
+            "Pd beta turn",
+            "II",
+            (2,),
+            (179.57, -55.26, 133.10, 179.60, 91.18, -6.22, 180.91),
+            (178.69, -55.28, 132.76, 175.53, 82.38, -2.88, 179.60),
         ),
-        label="PD beta turn",
-        previous_name="Type II",
-    ),
-    "beta_turn_pa": TurnMotifDefinition(
-        motif_type="beta_turn_pa",
-        length=4,
-        central_bp5_offsets=(2,),
-        residue_torsions=(
-            ResidueTorsionTargets(2, -60.0, 120.0),
-            ResidueTorsionTargets(3, 60.0, 30.0),
+        _beta_turn_definition(
+            "beta_turn_pa",
+            "Pa beta turn",
+            "new_prev_II",
+            (2,),
+            (176.22, -59.93, 135.21, 178.77, 58.69, 27.54, 177.53),
+            (180.97, -79.76, 149.11, 170.92, 61.47, 32.21, 180.14),
         ),
-        label="PA beta turn",
-        previous_name="Type II",
-        source="BetaTurnLib18",
-    ),
-    "beta_turn_ad_prime": TurnMotifDefinition(
-        motif_type="beta_turn_ad_prime",
-        length=4,
-        central_bp5_offsets=(2, 3),
-        residue_torsions=(
-            ResidueTorsionTargets(2, 60.0, 30.0),
-            ResidueTorsionTargets(3, 90.0, 0.0),
+        _beta_turn_definition(
+            "beta_turn_ad_prime",
+            "ad beta turn",
+            "I'",
+            (2, 3),
+            (182.81, 47.08, 44.65, 174.36, 82.66, 1.09, 182.92),
+            (177.14, 54.08, 37.14, 174.19, 77.07, 7.66, 182.45),
         ),
-        label="AD prime beta turn",
-        previous_name="Type I prime",
-    ),
-    "beta_turn_pd_prime": TurnMotifDefinition(
-        motif_type="beta_turn_pd_prime",
-        length=4,
-        central_bp5_offsets=(3,),
-        residue_torsions=(
-            ResidueTorsionTargets(2, 60.0, -120.0),
-            ResidueTorsionTargets(3, -80.0, 0.0),
+        _beta_turn_definition(
+            "beta_turn_ab1",
+            "AB1 beta turn",
+            "new_prev_VIII",
+            (2, 3),
+            (184.02, -67.20, -30.96, 172.54, -136.03, 162.29, 182.93),
+            (178.29, -76.75, -33.07, 180.05, -137.67, 155.99, 179.53),
         ),
-        label="PD prime beta turn",
-        previous_name="Type II prime",
-    ),
-    "beta_turn_ab1": TurnMotifDefinition(
-        motif_type="beta_turn_ab1",
-        length=4,
-        central_bp5_offsets=(2, 3),
-        residue_torsions=(
-            ResidueTorsionTargets(2, -67.0, -31.0),
-            ResidueTorsionTargets(3, -136.0, 162.0),
+        _beta_turn_definition(
+            "beta_turn_az",
+            "AZ beta turn",
+            "new_prev_VIII",
+            (2, 3),
+            (181.01, -74.11, -27.71, 182.08, -140.41, 75.09, 190.54),
+            (181.51, -83.81, -17.76, 182.70, -128.88, 61.72, 177.81),
         ),
-        label="AB1 beta turn",
-        previous_name="Type VIII",
-        source="BetaTurnLib18",
-    ),
-    "beta_turn_ab2": TurnMotifDefinition(
-        motif_type="beta_turn_ab2",
-        length=4,
-        central_bp5_offsets=(2, 3),
-        residue_torsions=(
-            ResidueTorsionTargets(2, -69.0, -30.0),
-            ResidueTorsionTargets(3, -120.0, 128.0),
+        _beta_turn_definition(
+            "beta_turn_ab2",
+            "AB2 beta turn",
+            "VIII",
+            (2, 3),
+            (175.48, -69.29, -30.16, 169.41, -120.25, 128.00, 177.81),
+            (179.88, -76.37, -33.97, 184.30, -116.48, 120.10, 183.38),
         ),
-        label="AB2 beta turn",
-        previous_name="Type VIII",
-        source="BetaTurnLib18",
-    ),
-    "beta_turn_az": TurnMotifDefinition(
-        motif_type="beta_turn_az",
-        length=4,
-        central_bp5_offsets=(2, 3),
-        residue_torsions=(
-            ResidueTorsionTargets(2, -74.0, -28.0),
-            ResidueTorsionTargets(3, -140.0, 75.0),
+        _beta_turn_definition(
+            "beta_turn_pd_prime",
+            "pD beta turn",
+            "II'",
+            (3,),
+            (179.73, 57.44, -130.18, 181.81, -95.43, 11.23, 181.96),
+            (177.42, 56.16, -135.60, 183.17, -90.92, 4.81, 180.04),
         ),
-        label="AZ beta turn",
-        previous_name="Type VIII",
-        source="BetaTurnLib18",
-    ),
-    "beta_turn_ag": TurnMotifDefinition(
-        motif_type="beta_turn_ag",
-        length=4,
-        central_bp5_offsets=(2, 3),
-        residue_torsions=(
-            ResidueTorsionTargets(2, -66.0, -19.0),
-            ResidueTorsionTargets(3, -82.0, 63.0),
+        _beta_turn_definition(
+            "beta_turn_ag",
+            "AG beta turn",
+            "new_prev_VIII",
+            (2, 3),
+            (179.98, -66.42, -19.26, 176.01, -82.48, 63.16, 183.48),
+            (184.32, -71.78, -15.84, 187.19, -87.70, 74.65, 181.63),
         ),
-        label="AG beta turn",
-        previous_name="Type VIII",
-        source="BetaTurnLib18",
-    ),
-    "gamma_turn_inverse": TurnMotifDefinition(
-        motif_type="gamma_turn_inverse",
-        length=3,
-        central_bp5_offsets=(2,),
-        residue_torsions=(ResidueTorsionTargets(2, -75.0, 65.0),),
-        label="inverse gamma turn",
-    ),
-    "gamma_turn_classic": TurnMotifDefinition(
-        motif_type="gamma_turn_classic",
-        length=3,
-        central_bp5_offsets=(2,),
-        residue_torsions=(ResidueTorsionTargets(2, 75.0, -65.0),),
-        label="classic gamma turn",
-    ),
+        _beta_turn_definition(
+            "beta_turn_bcis_p",
+            "BcisP beta turn",
+            "VIb",
+            (2,),
+            (178.76, -137.53, 119.38, 359.11, -66.49, 163.88, 179.76),
+            (176.27, -127.05, 120.42, 358.00, -65.63, 161.27, 182.14),
+            fixed_residue_names=((3, "PRO"),),
+            requires_cis_peptide=True,
+        ),
+        _beta_turn_definition(
+            "beta_turn_d_d",
+            "dD beta turn",
+            "new",
+            (3,),
+            (180.94, 94.08, -1.19, 186.08, -127.95, 15.44, 170.94),
+            (182.57, 99.89, -17.34, 185.02, -113.78, 9.87, 180.65),
+        ),
+        _beta_turn_definition(
+            "beta_turn_pcis_d",
+            "PcisD beta turn",
+            "VIa1",
+            (2,),
+            (175.04, -59.70, 144.37, 9.21, -92.77, 8.32, 175.56),
+            (175.04, -59.70, 144.37, 9.21, -92.77, 8.32, 175.56),
+            fixed_residue_names=((3, "PRO"),),
+            requires_cis_peptide=True,
+        ),
+        _beta_turn_definition(
+            "beta_turn_dn",
+            "dN beta turn",
+            "new",
+            (3,),
+            (183.90, 69.32, 8.93, 177.80, -131.73, -63.28, 185.11),
+            (178.53, 76.06, -3.15, 179.31, -122.82, -50.46, 179.84),
+        ),
+        _beta_turn_definition(
+            "beta_turn_dd",
+            "Dd beta turn",
+            "new",
+            (2,),
+            (182.75, -115.16, 15.69, 186.11, 100.65, -12.30, 176.58),
+            (177.54, -99.08, 19.56, 173.80, 108.72, -14.53, 182.16),
+        ),
+        _beta_turn_definition(
+            "beta_turn_pcis_p",
+            "PcisP beta turn",
+            "new_prev_VIb",
+            (2,),
+            (175.26, -66.01, 147.89, 0.25, -75.72, 142.11, 176.61),
+            (183.55, -78.86, 145.45, 353.82, -78.06, 140.34, 178.16),
+            fixed_residue_names=((3, "PRO"),),
+            requires_cis_peptide=True,
+        ),
+        _beta_turn_definition(
+            "beta_turn_cis_da",
+            "cisDA beta turn",
+            "new",
+            (3,),
+            (3.33, -94.18, 7.96, 187.90, -61.40, -38.41, 184.42),
+            (0.14, -97.53, 3.93, 184.13, -66.86, -35.89, 182.02),
+            fixed_residue_names=((2, "PRO"),),
+            requires_cis_peptide=True,
+        ),
+        _beta_turn_definition(
+            "beta_turn_pg",
+            "pG beta turn",
+            "new",
+            (3,),
+            (180.06, 73.58, -162.38, 180.27, -78.96, 77.17, 188.34),
+            (188.70, 68.28, -139.60, 178.07, -79.92, 121.91, 175.54),
+        ),
+        _beta_turn_definition(
+            "beta_turn_cis_dp",
+            "cisDP beta turn",
+            "new",
+            (3,),
+            (11.10, -86.47, 4.44, 169.99, -71.39, 157.80, 175.12),
+            (11.10, -86.47, 4.44, 169.99, -71.39, 157.80, 175.12),
+            fixed_residue_names=((2, "PRO"),),
+            requires_cis_peptide=True,
+        ),
+        TurnMotifDefinition(
+            motif_type="gamma_turn_inverse",
+            length=3,
+            central_bp5_offsets=(2,),
+            residue_torsions=(ResidueTorsionTargets(2, -75.0, 65.0),),
+            label="inverse gamma turn",
+        ),
+        TurnMotifDefinition(
+            motif_type="gamma_turn_classic",
+            length=3,
+            central_bp5_offsets=(2,),
+            residue_torsions=(ResidueTorsionTargets(2, 75.0, -65.0),),
+            label="classic gamma turn",
+        ),
+    )
 }
 
 RAMACHANDRAN_DISALLOWED = 0
@@ -517,13 +647,26 @@ def build_turn_motif_segment(
     chain_id: str = "A",
     starting_residue_id: int = 1,
     starting_atom_id: int = 1,
+    motif_definition: TurnMotifDefinition | None = None,
 ) -> TurnMotifSegment:
     """Grow a finite beta/gamma-turn motif around a fixed BP5 residue."""
-    motif_definition = require_turn_motif_definition(motif_type)
+    motif_definition = (
+        require_turn_motif_definition(motif_type)
+        if motif_definition is None
+        else motif_definition
+    )
+    if motif_definition.motif_type != motif_type:
+        raise ValueError("motif_definition.motif_type must match motif_type")
     if bp5_motif_offset not in motif_definition.central_bp5_offsets:
         raise ValueError(
             f"bp5_motif_offset must be one of "
             f"{motif_definition.central_bp5_offsets} for {motif_type}"
+        )
+    fixed_residue_names = _turn_motif_fixed_residue_names(motif_definition)
+    if bp5_motif_offset in fixed_residue_names:
+        raise ValueError(
+            f"BP5 cannot replace fixed {fixed_residue_names[bp5_motif_offset]} "
+            f"residue {bp5_motif_offset} in {motif_type}"
         )
 
     bp5 = (
@@ -568,6 +711,7 @@ def build_turn_motif_segment(
                     previous_coordinates=previous_coords,
                     next_coordinates=next_coords,
                     starting_atom_id=next_atom_id,
+                    res_name=fixed_residue_names.get(local_residue_id, "GLY"),
                 )
             )
         next_atom_id += arrays[-1].array_length()
@@ -588,6 +732,76 @@ def require_turn_motif_definition(
         return TURN_MOTIF_DEFINITIONS[motif_type]
     except KeyError as error:
         raise ValueError(f"unknown turn motif type {motif_type!r}") from error
+
+
+def turn_motif_definition_with_torsion_source(
+    motif_type: TurnMotifType,
+    torsion_source: TurnMotifTorsionSource = "mode",
+) -> TurnMotifDefinition:
+    """Return a motif definition using either modal or medoid torsions."""
+    if torsion_source not in {"mode", "medoid"}:
+        raise ValueError("torsion_source must be 'mode' or 'medoid'")
+    motif_definition = require_turn_motif_definition(motif_type)
+    if torsion_source == "medoid" and motif_definition.medoid_residue_torsions:
+        residue_torsions = motif_definition.medoid_residue_torsions
+        selected_source: TurnMotifTorsionSource = "medoid"
+    elif motif_definition.mode_residue_torsions:
+        residue_torsions = motif_definition.mode_residue_torsions
+        selected_source = "mode"
+    else:
+        residue_torsions = motif_definition.residue_torsions
+        selected_source = "mode"
+    return replace(
+        motif_definition,
+        residue_torsions=residue_torsions,
+        torsion_source=selected_source,
+        torsion_variant_label=selected_source,
+    )
+
+
+def turn_motif_perturbation_definitions(
+    motif_definition: TurnMotifDefinition,
+    step_degrees: float | None = None,
+    radius_degrees: float = 0.0,
+) -> tuple[TurnMotifDefinition, ...]:
+    """Return deterministic phi/psi perturbations around a selected motif."""
+    if radius_degrees < 0.0:
+        raise ValueError("radius_degrees must be non-negative")
+    if step_degrees is None or np.isclose(radius_degrees, 0.0):
+        return (motif_definition,)
+    if step_degrees <= 0.0:
+        raise ValueError("step_degrees must be positive")
+
+    offsets = np.arange(
+        -radius_degrees,
+        radius_degrees + step_degrees / 2.0,
+        step_degrees,
+    )
+    perturbable_targets = tuple(
+        targets
+        for targets in motif_definition.residue_torsions
+        if targets.phi_degrees is not None and targets.psi_degrees is not None
+    )
+    delta_sets = tuple(
+        delta_set
+        for delta_set in product(offsets.tolist(), repeat=2 * len(perturbable_targets))
+        if _turn_torsion_delta_within_radius(delta_set, radius_degrees)
+    )
+    ordered_delta_sets = sorted(
+        delta_sets,
+        key=lambda delta_set: (
+            sum(abs(delta) for delta in delta_set),
+            sum(delta * delta for delta in delta_set),
+            delta_set,
+        ),
+    )
+    return tuple(
+        _perturbed_turn_motif_definition(
+            motif_definition=motif_definition,
+            delta_set=delta_set,
+        )
+        for delta_set in ordered_delta_sets
+    )
 
 
 def score_secondary_structure_segment_clashes(
@@ -847,12 +1061,18 @@ def _turn_motif_torsions_by_offset(
             residue_offset=residue_offset,
             phi_degrees=(
                 defined_targets[residue_offset].phi_degrees
-                if residue_offset in defined_targets
+                if (
+                    residue_offset in defined_targets
+                    and defined_targets[residue_offset].phi_degrees is not None
+                )
                 else fallback.phi_degrees
             ),
             psi_degrees=(
                 defined_targets[residue_offset].psi_degrees
-                if residue_offset in defined_targets
+                if (
+                    residue_offset in defined_targets
+                    and defined_targets[residue_offset].psi_degrees is not None
+                )
                 else fallback.psi_degrees
             ),
             omega_after_degrees=(
@@ -863,6 +1083,76 @@ def _turn_motif_torsions_by_offset(
         )
         for residue_offset in range(1, motif_definition.length + 1)
     }
+
+
+def _turn_motif_fixed_residue_names(
+    motif_definition: TurnMotifDefinition,
+) -> dict[int, str]:
+    fixed_residue_names = {
+        residue_offset: residue_name
+        for residue_offset, residue_name in motif_definition.fixed_residue_names
+    }
+    invalid_offsets = [
+        residue_offset
+        for residue_offset in fixed_residue_names
+        if residue_offset < 1 or residue_offset > motif_definition.length
+    ]
+    if invalid_offsets:
+        raise ValueError(
+            f"fixed residue offsets must be within 1..{motif_definition.length}: "
+            f"{invalid_offsets}"
+        )
+    return fixed_residue_names
+
+
+def _turn_torsion_delta_within_radius(
+    delta_set: tuple[float, ...],
+    radius_degrees: float,
+) -> bool:
+    return all(abs(delta) <= radius_degrees for delta in delta_set)
+
+
+def _perturbed_turn_motif_definition(
+    motif_definition: TurnMotifDefinition,
+    delta_set: tuple[float, ...],
+) -> TurnMotifDefinition:
+    deltas = iter(delta_set)
+    perturbed_torsions: list[ResidueTorsionTargets] = []
+    label_parts: list[str] = [motif_definition.torsion_source]
+    for targets in motif_definition.residue_torsions:
+        if targets.phi_degrees is None or targets.psi_degrees is None:
+            perturbed_torsions.append(targets)
+            continue
+        phi_delta = float(next(deltas))
+        psi_delta = float(next(deltas))
+        perturbed_torsions.append(
+            replace(
+                targets,
+                phi_degrees=_normalize_signed_angle(
+                    targets.phi_degrees + phi_delta,
+                ),
+                psi_degrees=_normalize_signed_angle(
+                    targets.psi_degrees + psi_delta,
+                ),
+            )
+        )
+        label_parts.extend(
+            (
+                f"r{targets.residue_offset}",
+                f"dphi{_signed_angle_label_component(phi_delta)}",
+                f"dpsi{_signed_angle_label_component(psi_delta)}",
+            )
+        )
+    variant_label = (
+        motif_definition.torsion_source
+        if all(np.isclose(delta, 0.0) for delta in delta_set)
+        else "_".join(label_parts)
+    )
+    return replace(
+        motif_definition,
+        residue_torsions=tuple(perturbed_torsions),
+        torsion_variant_label=variant_label,
+    )
 
 
 def _grow_backbone_coordinates_from_residue_torsions(
@@ -1009,6 +1299,7 @@ def _new_backbone_residue(
     previous_coordinates: dict[str, np.ndarray] | None,
     next_coordinates: dict[str, np.ndarray] | None,
     starting_atom_id: int,
+    res_name: str = "GLY",
 ) -> struc.AtomArray:
     atom_names = list(BACKBONE_ATOM_NAMES)
     elements = ["N", "C", "C", "O"]
@@ -1018,6 +1309,7 @@ def _new_backbone_residue(
         coordinates=coordinates,
         previous_coordinates=previous_coordinates,
         next_coordinates=next_coordinates,
+        include_internal_n_hydrogen=res_name != "PRO",
     ):
         atom_names.append(atom_name)
         elements.append(element)
@@ -1029,7 +1321,7 @@ def _new_backbone_residue(
     atoms.chain_id = np.full(atom_count, chain_id, dtype="U4")
     atoms.res_id = np.full(atom_count, residue_id, dtype=int)
     atoms.ins_code = np.full(atom_count, "", dtype="U1")
-    atoms.res_name = np.full(atom_count, "GLY", dtype="U5")
+    atoms.res_name = np.full(atom_count, res_name, dtype="U5")
     atoms.hetero = np.zeros(atom_count, dtype=bool)
     atoms.atom_name = np.array(atom_names, dtype="U6")
     atoms.element = np.array(elements, dtype="U2")
@@ -1094,6 +1386,7 @@ def _peptide_cap_atom_records(
     coordinates: dict[str, np.ndarray],
     previous_coordinates: dict[str, np.ndarray] | None,
     next_coordinates: dict[str, np.ndarray] | None,
+    include_internal_n_hydrogen: bool = True,
 ) -> list[tuple[str, str, np.ndarray]]:
     atom_records: list[tuple[str, str, np.ndarray]] = []
     n_coord = coordinates["N"]
@@ -1113,7 +1406,7 @@ def _peptide_cap_atom_records(
                 ("H2", "H", h2_coord),
             ]
         )
-    else:
+    elif include_internal_n_hydrogen:
         atom_records.append(
             (
                 "H",

@@ -37,13 +37,15 @@ from .secondary_structure import (
     TURN_MOTIF_DEFINITIONS,
     TurnMotifDefinition,
     TurnMotifSegment,
+    TurnMotifTorsionSource,
     TurnMotifType,
     build_regular_secondary_structure_segment,
     build_turn_motif_segment,
     measure_secondary_structure_orientation,
-    require_turn_motif_definition,
     score_nanoring_cylinder_intrusions,
     secondary_structure_phi_psi_scan_targets,
+    turn_motif_definition_with_torsion_source,
+    turn_motif_perturbation_definitions,
 )
 
 DEFAULT_M_VALUES = (18, 24, 30, 36)
@@ -144,6 +146,8 @@ TURN_MOTIF_REPORT_FIELDS = (
     "turn_label",
     "turn_previous_name",
     "turn_source",
+    "turn_torsion_source",
+    "turn_torsion_variant",
     "turn_phi_psi_r2",
     "turn_phi_psi_r3",
     "turn_middle_phi_psi",
@@ -612,6 +616,9 @@ def place_bp5_rotamer_ensembles_around_nanoring(
     turn_bp5_position: str | int = "central",
     turn_scan_limit: int | None = None,
     include_cis_turns: bool = False,
+    turn_motif_torsion_source: TurnMotifTorsionSource = "mode",
+    turn_motif_perturbation_step_degrees: float | None = None,
+    turn_motif_perturbation_radius_degrees: float = 0.0,
 ) -> BP5NanoringRotamerPlacement:
     """Place BP5/Pd sidechains and enumerate fixed-active-site chi rotamers."""
     _validate_positive_limit(rotamer_scan_limit, "rotamer_scan_limit")
@@ -637,9 +644,13 @@ def place_bp5_rotamer_ensembles_around_nanoring(
         raise ValueError(
             "secondary_structure_ramachandran_level must be 'favored' or 'allowed'"
         )
+    turn_motifs = tuple(turn_motifs)
     turn_motif_definitions = _turn_motif_definitions(
         turn_motifs,
         include_cis_turns=include_cis_turns,
+        torsion_source=turn_motif_torsion_source,
+        perturbation_step_degrees=turn_motif_perturbation_step_degrees,
+        perturbation_radius_degrees=turn_motif_perturbation_radius_degrees,
     )
 
     rigid_placement = place_bp5_sidechains_around_nanoring(
@@ -797,6 +808,9 @@ def write_bp5_nanoring_series(
     turn_bp5_position: str | int = "central",
     turn_scan_limit: int | None = None,
     include_cis_turns: bool = False,
+    turn_motif_torsion_source: TurnMotifTorsionSource = "mode",
+    turn_motif_perturbation_step_degrees: float | None = None,
+    turn_motif_perturbation_radius_degrees: float = 0.0,
     progress: Callable[[str], None] | None = None,
 ) -> list[Path]:
     """Write nanoring-only and BP5-placed structures for each requested M value."""
@@ -823,9 +837,13 @@ def write_bp5_nanoring_series(
         raise ValueError(
             "secondary_structure_ramachandran_level must be 'favored' or 'allowed'"
         )
+    turn_motifs = tuple(turn_motifs)
     turn_motif_definitions = _turn_motif_definitions(
         turn_motifs,
         include_cis_turns=include_cis_turns,
+        torsion_source=turn_motif_torsion_source,
+        perturbation_step_degrees=turn_motif_perturbation_step_degrees,
+        perturbation_radius_degrees=turn_motif_perturbation_radius_degrees,
     )
 
     m_values = tuple(m_values)
@@ -938,12 +956,17 @@ def write_bp5_nanoring_series(
             secondary_structure_clash_cutoff=secondary_structure_clash_cutoff,
             secondary_structure_cylinder_filter=secondary_structure_cylinder_filter,
             secondary_structure_cylinder_radius=secondary_structure_cylinder_radius,
-            turn_motifs=tuple(
-                definition.motif_type for definition in turn_motif_definitions
-            ),
+            turn_motifs=turn_motifs,
             turn_bp5_position=turn_bp5_position,
             turn_scan_limit=turn_scan_limit,
             include_cis_turns=include_cis_turns,
+            turn_motif_torsion_source=turn_motif_torsion_source,
+            turn_motif_perturbation_step_degrees=(
+                turn_motif_perturbation_step_degrees
+            ),
+            turn_motif_perturbation_radius_degrees=(
+                turn_motif_perturbation_radius_degrees
+            ),
         )
         _emit_progress(
             progress,
@@ -1190,11 +1213,16 @@ def write_bp5_nanoring_series(
                     secondary_structure_cylinder_radius
                 ),
                 "secondary_structure_cylinder_radius_unit": "Angstrom",
-                "turn_motifs": [
-                    definition.motif_type for definition in turn_motif_definitions
-                ],
+                "turn_motifs": list(turn_motifs),
                 "turn_bp5_position": turn_bp5_position,
                 "turn_scan_limit": turn_scan_limit,
+                "turn_motif_torsion_source": turn_motif_torsion_source,
+                "turn_motif_perturbation_step_degrees": (
+                    turn_motif_perturbation_step_degrees
+                ),
+                "turn_motif_perturbation_radius_degrees": (
+                    turn_motif_perturbation_radius_degrees
+                ),
                 "available_turn_motif_states": len(
                     DEFAULT_BP5_CHI_ROTAMERS
                 )
@@ -1444,6 +1472,8 @@ def _turn_motif_report_rows(
                     "turn_label": motif_definition.label,
                     "turn_previous_name": motif_definition.previous_name or "",
                     "turn_source": motif_definition.source,
+                    "turn_torsion_source": motif_definition.torsion_source,
+                    "turn_torsion_variant": motif_definition.torsion_variant_label,
                     "turn_phi_psi_r2": _turn_phi_psi_report_value(
                         motif_definition,
                         residue_offset=2,
@@ -1790,13 +1820,7 @@ def _flatten_turn_motif_states(
             ),
             key=lambda candidate: (
                 candidate.rotamer_candidate.residue_id,
-                state_rank[
-                    (
-                        f"{candidate.rotamer_candidate.rotamer.name}_"
-                        f"{candidate.segment.motif_type}_"
-                        f"bp5pos{candidate.segment.bp5_motif_offset}"
-                    )
-                ],
+                state_rank[_turn_motif_candidate_state_key(candidate)],
             ),
         )
     )
@@ -1814,11 +1838,29 @@ def _turn_motif_state_score_key(
     return (state.clash_score, _turn_motif_state_key(state))
 
 
+def _turn_motif_candidate_state_key(candidate: BP5TurnMotifPlacement) -> str:
+    return (
+        f"{candidate.rotamer_candidate.rotamer.name}_"
+        f"{candidate.segment.motif_type}_"
+        f"bp5pos{candidate.segment.bp5_motif_offset}"
+        f"{_turn_motif_variant_key_suffix(candidate.segment.motif_definition)}"
+    )
+
+
 def _turn_motif_state_key(state: BP5SymmetricTurnMotifState) -> str:
     return (
         f"{state.rotamer_name}_{state.motif_definition.motif_type}"
         f"_bp5pos{state.bp5_motif_offset}"
+        f"{_turn_motif_variant_key_suffix(state.motif_definition)}"
     )
+
+
+def _turn_motif_variant_key_suffix(
+    motif_definition: TurnMotifDefinition,
+) -> str:
+    if motif_definition.torsion_variant_label == "mode":
+        return ""
+    return f"_{motif_definition.torsion_variant_label}"
 
 
 def _turn_motif_output_filename(
@@ -1846,14 +1888,30 @@ def _secondary_structure_torsion_targets(
 def _turn_motif_definitions(
     turn_motifs: Iterable[TurnMotifType],
     include_cis_turns: bool,
+    torsion_source: TurnMotifTorsionSource,
+    perturbation_step_degrees: float | None,
+    perturbation_radius_degrees: float,
 ) -> tuple[TurnMotifDefinition, ...]:
-    if include_cis_turns:
+    if perturbation_radius_degrees < 0.0:
+        raise ValueError("turn_motif_perturbation_radius_degrees must be non-negative")
+    if (
+        perturbation_step_degrees is not None
+        and perturbation_step_degrees <= 0.0
+    ):
+        raise ValueError("turn_motif_perturbation_step_degrees must be positive")
+    if (
+        perturbation_step_degrees is not None
+        and np.isclose(perturbation_radius_degrees, 0.0)
+    ):
         raise ValueError(
-            "cis-peptide turn classes are not implemented yet; omega and "
-            "residue identity constraints must be added first"
+            "turn_motif_perturbation_radius_degrees must be positive when "
+            "turn_motif_perturbation_step_degrees is set"
         )
     definitions = tuple(
-        require_turn_motif_definition(motif_type)
+        turn_motif_definition_with_torsion_source(
+            motif_type,
+            torsion_source=torsion_source,
+        )
         for motif_type in turn_motifs
     )
     cis_definitions = [
@@ -1861,11 +1919,25 @@ def _turn_motif_definitions(
         for definition in definitions
         if definition.requires_cis_peptide
     ]
-    if cis_definitions:
+    if cis_definitions and not include_cis_turns:
         raise ValueError(
-            f"cis-peptide turn motifs are not implemented yet: {cis_definitions}"
+            "cis-peptide turn motifs require --include-cis-turns: "
+            f"{cis_definitions}"
         )
-    return definitions
+    if perturbation_step_degrees is None or np.isclose(
+        perturbation_radius_degrees,
+        0.0,
+    ):
+        return definitions
+    return tuple(
+        perturbed_definition
+        for definition in definitions
+        for perturbed_definition in turn_motif_perturbation_definitions(
+            definition,
+            step_degrees=perturbation_step_degrees,
+            radius_degrees=perturbation_radius_degrees,
+        )
+    )
 
 
 def _turn_motif_scan_inputs(
@@ -2060,6 +2132,7 @@ def _build_symmetric_turn_motif_states(
                 bp5_motif_offset=bp5_motif_offset,
                 starting_residue_id=1 + (candidate.residue_id - 1) * segment_span,
                 starting_atom_id=next_atom_id,
+                motif_definition=motif_definition,
             )
             next_atom_id += segment.atom_array.array_length()
             segment_pairs.append((candidate, segment))
@@ -2619,11 +2692,38 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--turn-motif-torsions",
+        choices=["mode", "medoid"],
+        default="mode",
+        help=(
+            "Use BetaTurnLib18 modal or medoid torsions for beta-turn motifs. "
+            "Defaults to mode."
+        ),
+    )
+    parser.add_argument(
+        "--turn-motif-perturbation-step",
+        type=float,
+        default=None,
+        help=(
+            "Enable turn phi/psi perturbation scanning at this grid spacing "
+            "in degrees. Requires a positive perturbation radius."
+        ),
+    )
+    parser.add_argument(
+        "--turn-motif-perturbation-radius",
+        type=float,
+        default=0.0,
+        help=(
+            "Maximum absolute phi/psi perturbation in degrees around each "
+            "selected turn motif torsion. Defaults to 0."
+        ),
+    )
+    parser.add_argument(
         "--include-cis-turns",
         action="store_true",
         help=(
-            "Request cis-peptide turn classes. This currently fails until "
-            "omega and residue identity constraints are implemented."
+            "Allow explicit cis-peptide turn classes with non-trans omega "
+            "and fixed Pro residue positions."
         ),
     )
     parser.add_argument(
@@ -2699,6 +2799,13 @@ def main(argv: list[str] | None = None) -> int:
             args.scan_limit if args.turn_scan_limit is None else args.turn_scan_limit
         ),
         include_cis_turns=args.include_cis_turns,
+        turn_motif_torsion_source=args.turn_motif_torsions,
+        turn_motif_perturbation_step_degrees=(
+            args.turn_motif_perturbation_step
+        ),
+        turn_motif_perturbation_radius_degrees=(
+            args.turn_motif_perturbation_radius
+        ),
         progress=lambda message: print(message, file=sys.stderr),
     )
     for path in written_paths:

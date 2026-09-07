@@ -29,6 +29,8 @@ from swacanatase.secondary_structure import (
     score_secondary_structure_segment_clashes,
     secondary_structure_phi_psi_scan_matrix,
     secondary_structure_phi_psi_scan_targets,
+    turn_motif_definition_with_torsion_source,
+    turn_motif_perturbation_definitions,
 )
 
 
@@ -338,6 +340,11 @@ def test_secondary_structure_orientation_reports_frame_and_exit_vectors() -> Non
 
 def test_turn_motif_definitions_have_valid_bp5_offsets() -> None:
     assert TURN_MOTIF_DEFINITIONS
+    assert sum(
+        1
+        for motif_definition in TURN_MOTIF_DEFINITIONS.values()
+        if motif_definition.length == 4
+    ) == 18
     for motif_definition in TURN_MOTIF_DEFINITIONS.values():
         assert motif_definition.length in {3, 4}
         assert all(
@@ -345,9 +352,19 @@ def test_turn_motif_definitions_have_valid_bp5_offsets() -> None:
             for offset in motif_definition.central_bp5_offsets
         )
         assert all(
-            np.isclose(target.omega_after_degrees, TRANS_PEPTIDE_OMEGA_DEGREES)
+            offset not in dict(motif_definition.fixed_residue_names)
+            for offset in motif_definition.central_bp5_offsets
+        )
+        omega_values = [
+            target.omega_after_degrees
             for target in motif_definition.residue_torsions
-            if not motif_definition.requires_cis_peptide
+        ]
+        if motif_definition.requires_cis_peptide:
+            assert any(_angle_close(omega, 0.0, atol=15.0) for omega in omega_values)
+            continue
+        assert all(
+            _angle_close(omega, TRANS_PEPTIDE_OMEGA_DEGREES, atol=20.0)
+            for omega in omega_values
         )
 
 
@@ -398,6 +415,64 @@ def test_generated_beta_turn_geometry_matches_targets() -> None:
             _dihedral(residue, "N", residue, "CA", residue, "C", next_residue, "N"),
             targets.psi_degrees,
         )
+
+
+def test_beta_turn_medoid_torsion_selection_changes_targets() -> None:
+    mode_definition = turn_motif_definition_with_torsion_source(
+        "beta_turn_ad",
+        torsion_source="mode",
+    )
+    medoid_definition = turn_motif_definition_with_torsion_source(
+        "beta_turn_ad",
+        torsion_source="medoid",
+    )
+
+    assert mode_definition.torsion_source == "mode"
+    assert medoid_definition.torsion_source == "medoid"
+    assert mode_definition.residue_torsions != medoid_definition.residue_torsions
+    assert np.isclose(medoid_definition.residue_torsions[1].phi_degrees, -65.27)
+
+
+def test_turn_motif_perturbation_definitions_are_centered_and_ordered() -> None:
+    motif_definition = turn_motif_definition_with_torsion_source("gamma_turn_inverse")
+
+    variants = turn_motif_perturbation_definitions(
+        motif_definition,
+        step_degrees=5.0,
+        radius_degrees=5.0,
+    )
+
+    assert len(variants) == 9
+    assert variants[0].torsion_variant_label == "mode"
+    assert variants[0].residue_torsions == motif_definition.residue_torsions
+    assert {
+        target.phi_degrees
+        for variant in variants
+        for target in variant.residue_torsions
+    } == {-80.0, -75.0, -70.0}
+
+
+def test_cis_pro_beta_turn_builder_uses_non_trans_omega_and_fixed_pro() -> None:
+    segment = build_turn_motif_segment(
+        _first_bp5_rotamer(),
+        motif_type="beta_turn_pcis_d",
+        bp5_motif_offset=2,
+    )
+    residue_2 = _residue(segment.atom_array, 2)
+    residue_3 = _residue(segment.atom_array, 3)
+    residue_4 = _residue(segment.atom_array, 4)
+
+    assert residue_2.res_name[0] == "BP5"
+    assert residue_3.res_name[0] == "PRO"
+    assert "H" not in residue_3.atom_name.tolist()
+    assert _angle_close(
+        _dihedral(residue_2, "CA", residue_2, "C", residue_3, "N", residue_3, "CA"),
+        9.21,
+    )
+    assert _angle_close(
+        _dihedral(residue_3, "CA", residue_3, "C", residue_4, "N", residue_4, "CA"),
+        175.56,
+    )
 
 
 def test_gamma_turn_builder_places_bp5_at_middle_position() -> None:

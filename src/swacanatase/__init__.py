@@ -66,6 +66,7 @@ from .secondary_structure import (
     SecondaryStructureSegment,
     TurnMotifDefinition,
     TurnMotifSegment,
+    TurnMotifTorsionSource,
     build_regular_secondary_structure_segment,
     build_turn_motif_segment,
     measure_secondary_structure_orientation,
@@ -74,6 +75,8 @@ from .secondary_structure import (
     score_secondary_structure_segment_clashes,
     secondary_structure_phi_psi_scan_matrix,
     secondary_structure_phi_psi_scan_targets,
+    turn_motif_definition_with_torsion_source,
+    turn_motif_perturbation_definitions,
 )
 
 __all__ = [
@@ -112,6 +115,7 @@ __all__ = [
     "SecondaryStructureSegment",
     "TurnMotifDefinition",
     "TurnMotifSegment",
+    "TurnMotifTorsionSource",
     "SecondaryStructureClashScore",
     "SecondaryStructureOrientationMetrics",
     "RamachandranBasin",
@@ -143,6 +147,8 @@ __all__ = [
     "score_secondary_structure_segment_clashes",
     "secondary_structure_phi_psi_scan_matrix",
     "secondary_structure_phi_psi_scan_targets",
+    "turn_motif_definition_with_torsion_source",
+    "turn_motif_perturbation_definitions",
     "write_bp5_nanoring_series",
     "write_armchair_nanoring",
 ]
