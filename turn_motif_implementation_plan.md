@@ -9,6 +9,19 @@ position in canonical beta-turn and gamma-turn backbones while preserving the
 existing BP5/Pd/nanoring catalytic geometry and the existing clash/cylinder
 filters.
 
+## Implementation Status
+
+Complete for the first implementation segment:
+
+- Phase 1: static motif library and turn builder.
+- Phase 2: placement integration and reuse of existing clash/cylinder scoring.
+- Phase 3: CLI, generated turn outputs, `turn_motif_scores.csv`, and metadata.
+- Acceptance tests 1-7.
+
+Pending:
+
+- Phase 4 motif refinement, perturbation scans, and full cis-Pro turn support.
+
 ## Background
 
 The existing implementation treats secondary structure as a repeated phi/psi

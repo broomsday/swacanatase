@@ -34,8 +34,14 @@ from .secondary_structure import (
     SecondaryStructureType,
     SecondaryStructureSegment,
     SECONDARY_STRUCTURE_TARGETS,
+    TURN_MOTIF_DEFINITIONS,
+    TurnMotifDefinition,
+    TurnMotifSegment,
+    TurnMotifType,
     build_regular_secondary_structure_segment,
+    build_turn_motif_segment,
     measure_secondary_structure_orientation,
+    require_turn_motif_definition,
     score_nanoring_cylinder_intrusions,
     secondary_structure_phi_psi_scan_targets,
 )
@@ -48,6 +54,7 @@ DEFAULT_ROTAMER_OUTPUT_DIR = DEFAULT_GENERATED_DATA_DIR / "rotamers"
 DEFAULT_SECONDARY_STRUCTURE_OUTPUT_DIR = (
     DEFAULT_GENERATED_DATA_DIR / "secondary_structure"
 )
+DEFAULT_TURN_MOTIF_OUTPUT_DIR = DEFAULT_GENERATED_DATA_DIR / "turn_motif"
 DEFAULT_REPORT_OUTPUT_DIR = DEFAULT_GENERATED_DATA_DIR / "reports"
 DEFAULT_SECONDARY_STRUCTURE_RESIDUES_BEFORE = 3
 DEFAULT_SECONDARY_STRUCTURE_RESIDUES_AFTER = 3
@@ -106,6 +113,58 @@ SECONDARY_STRUCTURE_REPORT_FIELDS = (
     "cylinder_z_max",
     "secondary_clash_score",
     "secondary_clash_score_per_site",
+    "scaffold_clash_score",
+    "scaffold_clash_score_per_site",
+    "bp5_clash_score",
+    "bp5_clash_score_per_site",
+    "neighboring_backbone_clash_score",
+    "neighboring_backbone_clash_score_per_site",
+    "radial_alignment",
+    "tangential_alignment",
+    "axial_alignment",
+    "secondary_structure_direction_x",
+    "secondary_structure_direction_y",
+    "secondary_structure_direction_z",
+    "n_terminal_exit_vector_x",
+    "n_terminal_exit_vector_y",
+    "n_terminal_exit_vector_z",
+    "c_terminal_exit_vector_x",
+    "c_terminal_exit_vector_y",
+    "c_terminal_exit_vector_z",
+    "output_path",
+)
+TURN_MOTIF_REPORT_FIELDS = (
+    "m",
+    "units",
+    "anchor_phase_offset",
+    "snap_virtual_carbons",
+    "motif_type",
+    "motif_length",
+    "bp5_motif_offset",
+    "turn_label",
+    "turn_previous_name",
+    "turn_source",
+    "turn_phi_psi_r2",
+    "turn_phi_psi_r3",
+    "turn_middle_phi_psi",
+    "turn_contains_positive_phi_for_bp5",
+    "turn_requires_cis_peptide",
+    "residue_id",
+    "anchor_angle_degrees",
+    "rotamer_name",
+    "state_scan_index",
+    "state_score_rank",
+    "accepted",
+    "cylinder_intrusion_count",
+    "cylinder_intrusion_count_per_site",
+    "cylinder_total_intrusion_depth",
+    "cylinder_total_intrusion_depth_per_site",
+    "cylinder_max_intrusion_depth",
+    "cylinder_radius",
+    "cylinder_z_min",
+    "cylinder_z_max",
+    "turn_motif_clash_score",
+    "turn_motif_clash_score_per_site",
     "scaffold_clash_score",
     "scaffold_clash_score_per_site",
     "bp5_clash_score",
@@ -204,6 +263,56 @@ class BP5SecondaryStructurePlacement:
 
 
 @dataclass(frozen=True)
+class BP5TurnMotifPlacement:
+    """A grown turn-motif candidate with full-state clash components."""
+
+    rotamer_candidate: BP5RotamerPlacement
+    segment: TurnMotifSegment
+    orientation_metrics: SecondaryStructureOrientationMetrics
+    scaffold_clash_score: float
+    bp5_clash_score: float
+    neighboring_backbone_clash_score: float
+    clash_score: float
+    cylinder_intrusion_score: NanoringCylinderIntrusionScore
+
+    @property
+    def secondary_structure_direction(self) -> np.ndarray:
+        return self.orientation_metrics.secondary_structure_direction
+
+    @property
+    def radial_alignment(self) -> float:
+        return self.orientation_metrics.radial_alignment
+
+    @property
+    def tangential_alignment(self) -> float:
+        return self.orientation_metrics.tangential_alignment
+
+    @property
+    def axial_alignment(self) -> float:
+        return self.orientation_metrics.axial_alignment
+
+    @property
+    def n_terminal_exit_vector(self) -> np.ndarray:
+        return self.orientation_metrics.n_terminal_exit_vector
+
+    @property
+    def c_terminal_exit_vector(self) -> np.ndarray:
+        return self.orientation_metrics.c_terminal_exit_vector
+
+    @property
+    def cylinder_intrusion_count(self) -> int:
+        return self.cylinder_intrusion_score.intruding_atom_count
+
+    @property
+    def cylinder_total_intrusion_depth(self) -> float:
+        return self.cylinder_intrusion_score.total_intrusion_depth
+
+    @property
+    def cylinder_max_intrusion_depth(self) -> float:
+        return self.cylinder_intrusion_score.max_intrusion_depth
+
+
+@dataclass(frozen=True)
 class BP5SymmetricRotamerState:
     """One BP5 chi state represented at every selected nanoring anchor."""
 
@@ -237,6 +346,27 @@ class BP5SymmetricSecondaryStructureState:
 
 
 @dataclass(frozen=True)
+class BP5SymmetricTurnMotifState:
+    """One symmetric turn-motif state represented at every anchor."""
+
+    rotamer_name: str
+    motif_definition: TurnMotifDefinition
+    bp5_motif_offset: int
+    candidates: tuple[BP5TurnMotifPlacement, ...]
+    scaffold_clash_score: float
+    bp5_clash_score: float
+    neighboring_backbone_clash_score: float
+    clash_score: float
+    cylinder_intrusion_score: NanoringCylinderIntrusionScore
+
+    @property
+    def segments(self) -> struc.AtomArray:
+        return struc.concatenate(
+            [candidate.segment.atom_array for candidate in self.candidates]
+        )
+
+
+@dataclass(frozen=True)
 class BP5NanoringRotamerPlacement:
     """Rigid BP5/Pd placement plus full-state rotamer/segment candidates."""
 
@@ -256,6 +386,10 @@ class BP5NanoringRotamerPlacement:
     accepted_secondary_structure_states: tuple[
         BP5SymmetricSecondaryStructureState, ...
     ] = ()
+    turn_motif_candidates: tuple[BP5TurnMotifPlacement, ...] = ()
+    accepted_turn_motif_candidates: tuple[BP5TurnMotifPlacement, ...] = ()
+    turn_motif_states: tuple[BP5SymmetricTurnMotifState, ...] = ()
+    accepted_turn_motif_states: tuple[BP5SymmetricTurnMotifState, ...] = ()
 
 
 def generate_m_equals_n_nanoring(
@@ -474,6 +608,10 @@ def place_bp5_rotamer_ensembles_around_nanoring(
     ),
     secondary_structure_cylinder_filter: bool = True,
     secondary_structure_cylinder_radius: float | None = None,
+    turn_motifs: Iterable[TurnMotifType] = (),
+    turn_bp5_position: str | int = "central",
+    turn_scan_limit: int | None = None,
+    include_cis_turns: bool = False,
 ) -> BP5NanoringRotamerPlacement:
     """Place BP5/Pd sidechains and enumerate fixed-active-site chi rotamers."""
     _validate_positive_limit(rotamer_scan_limit, "rotamer_scan_limit")
@@ -483,6 +621,7 @@ def place_bp5_rotamer_ensembles_around_nanoring(
         secondary_structure_scan_limit,
         "secondary_structure_scan_limit",
     )
+    _validate_positive_limit(turn_scan_limit, "turn_scan_limit")
     if residues_before < 0 or residues_after < 0:
         raise ValueError("residue counts must be non-negative")
     if (
@@ -498,6 +637,10 @@ def place_bp5_rotamer_ensembles_around_nanoring(
         raise ValueError(
             "secondary_structure_ramachandran_level must be 'favored' or 'allowed'"
         )
+    turn_motif_definitions = _turn_motif_definitions(
+        turn_motifs,
+        include_cis_turns=include_cis_turns,
+    )
 
     rigid_placement = place_bp5_sidechains_around_nanoring(
         m=m,
@@ -546,6 +689,10 @@ def place_bp5_rotamer_ensembles_around_nanoring(
     accepted_secondary_candidates: tuple[BP5SecondaryStructurePlacement, ...] = ()
     secondary_states: tuple[BP5SymmetricSecondaryStructureState, ...] = ()
     accepted_secondary_states: tuple[BP5SymmetricSecondaryStructureState, ...] = ()
+    turn_candidates: tuple[BP5TurnMotifPlacement, ...] = ()
+    accepted_turn_candidates: tuple[BP5TurnMotifPlacement, ...] = ()
+    turn_states: tuple[BP5SymmetricTurnMotifState, ...] = ()
+    accepted_turn_states: tuple[BP5SymmetricTurnMotifState, ...] = ()
     if secondary_structure is not None:
         torsion_targets = _secondary_structure_torsion_targets(
             secondary_structure=secondary_structure,
@@ -578,6 +725,29 @@ def place_bp5_rotamer_ensembles_around_nanoring(
         accepted_secondary_candidates = _flatten_secondary_structure_states(
             accepted_secondary_states
         )
+    if turn_motif_definitions:
+        turn_scan_inputs = _limit_tuple(
+            _turn_motif_scan_inputs(
+                rotamer_states=accepted_rotamer_states,
+                motif_definitions=turn_motif_definitions,
+                turn_bp5_position=turn_bp5_position,
+            ),
+            turn_scan_limit,
+        )
+        turn_states = _build_symmetric_turn_motif_states(
+            turn_motif_scan_inputs=turn_scan_inputs,
+            nanoring=rigid_placement.nanoring,
+            anchor_pairs=rigid_placement.anchor_pairs,
+            starting_atom_id=rigid_placement.nanoring.array_length() + 1,
+            cylinder_radius=secondary_structure_cylinder_radius,
+        )
+        accepted_turn_states = _select_symmetric_turn_motif_states(
+            states=turn_states,
+            clash_cutoff=secondary_structure_clash_cutoff,
+            cylinder_filter=secondary_structure_cylinder_filter,
+        )
+        turn_candidates = _flatten_turn_motif_states(turn_states)
+        accepted_turn_candidates = _flatten_turn_motif_states(accepted_turn_states)
 
     return BP5NanoringRotamerPlacement(
         m=m,
@@ -592,6 +762,10 @@ def place_bp5_rotamer_ensembles_around_nanoring(
         accepted_rotamer_states=accepted_rotamer_states,
         secondary_structure_states=secondary_states,
         accepted_secondary_structure_states=accepted_secondary_states,
+        turn_motif_candidates=turn_candidates,
+        accepted_turn_motif_candidates=accepted_turn_candidates,
+        turn_motif_states=turn_states,
+        accepted_turn_motif_states=accepted_turn_states,
     )
 
 
@@ -619,6 +793,10 @@ def write_bp5_nanoring_series(
     ),
     secondary_structure_cylinder_filter: bool = True,
     secondary_structure_cylinder_radius: float | None = None,
+    turn_motifs: Iterable[TurnMotifType] = (),
+    turn_bp5_position: str | int = "central",
+    turn_scan_limit: int | None = None,
+    include_cis_turns: bool = False,
     progress: Callable[[str], None] | None = None,
 ) -> list[Path]:
     """Write nanoring-only and BP5-placed structures for each requested M value."""
@@ -629,6 +807,7 @@ def write_bp5_nanoring_series(
         secondary_structure_scan_limit,
         "secondary_structure_scan_limit",
     )
+    _validate_positive_limit(turn_scan_limit, "turn_scan_limit")
     if residues_before < 0 or residues_after < 0:
         raise ValueError("residue counts must be non-negative")
     if (
@@ -644,6 +823,10 @@ def write_bp5_nanoring_series(
         raise ValueError(
             "secondary_structure_ramachandran_level must be 'favored' or 'allowed'"
         )
+    turn_motif_definitions = _turn_motif_definitions(
+        turn_motifs,
+        include_cis_turns=include_cis_turns,
+    )
 
     m_values = tuple(m_values)
     output_dir = Path(output_dir)
@@ -651,6 +834,7 @@ def write_bp5_nanoring_series(
     theozyme_output_dir = output_dir / "theozyme"
     rotamer_output_dir = output_dir / "rotamers"
     secondary_structure_output_dir = output_dir / "secondary_structure"
+    turn_motif_output_dir = output_dir / "turn_motif"
     report_output_dir = output_dir / "reports"
     nanoring_output_dir.mkdir(parents=True, exist_ok=True)
     theozyme_output_dir.mkdir(parents=True, exist_ok=True)
@@ -658,12 +842,15 @@ def write_bp5_nanoring_series(
         rotamer_output_dir.mkdir(parents=True, exist_ok=True)
     if secondary_structure is not None:
         secondary_structure_output_dir.mkdir(parents=True, exist_ok=True)
+    if turn_motif_definitions:
+        turn_motif_output_dir.mkdir(parents=True, exist_ok=True)
     if write_reports:
         report_output_dir.mkdir(parents=True, exist_ok=True)
 
     written_paths: list[Path] = []
     rotamer_report_rows: list[dict[str, object]] = []
     secondary_structure_report_rows: list[dict[str, object]] = []
+    turn_motif_report_rows: list[dict[str, object]] = []
     run_summaries: list[dict[str, object]] = []
     for m_index, m in enumerate(m_values, start=1):
         _emit_progress(
@@ -699,7 +886,11 @@ def write_bp5_nanoring_series(
             f"[{m_index}/{len(m_values)}] M={m}: wrote scaffold and rigid complex",
         )
 
-        if not enumerate_bp5_rotamers and secondary_structure is None:
+        if (
+            not enumerate_bp5_rotamers
+            and secondary_structure is None
+            and not turn_motif_definitions
+        ):
             run_summaries.append(
                 {
                     "m": m,
@@ -708,6 +899,8 @@ def write_bp5_nanoring_series(
                     "rotamer_states_accepted": 0,
                     "secondary_structure_states_scanned": 0,
                     "secondary_structure_states_accepted": 0,
+                    "turn_motif_states_scanned": 0,
+                    "turn_motif_states_accepted": 0,
                 }
             )
             continue
@@ -745,6 +938,12 @@ def write_bp5_nanoring_series(
             secondary_structure_clash_cutoff=secondary_structure_clash_cutoff,
             secondary_structure_cylinder_filter=secondary_structure_cylinder_filter,
             secondary_structure_cylinder_radius=secondary_structure_cylinder_radius,
+            turn_motifs=tuple(
+                definition.motif_type for definition in turn_motif_definitions
+            ),
+            turn_bp5_position=turn_bp5_position,
+            turn_scan_limit=turn_scan_limit,
+            include_cis_turns=include_cis_turns,
         )
         _emit_progress(
             progress,
@@ -768,6 +967,15 @@ def write_bp5_nanoring_series(
                     f"[{m_index}/{len(m_values)}] M={m}: scanning "
                     f"{secondary_structure_target_count} phi/psi target(s) "
                     f"per accepted rotamer state"
+                ),
+            )
+        if turn_motif_definitions:
+            _emit_progress(
+                progress,
+                (
+                    f"[{m_index}/{len(m_values)}] M={m}: scanning "
+                    f"{len(rotamer_placement.turn_motif_states)} "
+                    f"turn-motif state(s)"
                 ),
             )
         rotamer_output_paths: dict[str, Path] = {}
@@ -814,6 +1022,28 @@ def write_bp5_nanoring_series(
                 )
             )
             secondary_structure_output_paths[state_key] = segment_path
+        turn_motif_output_paths: dict[str, Path] = {}
+        for state in rotamer_placement.accepted_turn_motif_states:
+            state_key = _turn_motif_state_key(state)
+            turn_motif_path = (
+                turn_motif_output_dir
+                / _turn_motif_output_filename(
+                    m=m,
+                    state=state,
+                    file_format=file_format,
+                )
+            )
+            written_paths.append(
+                write_structure(
+                    atom_array=struc.concatenate(
+                        [rotamer_placement.nanoring, state.segments]
+                    ),
+                    output_path=turn_motif_path,
+                    file_format=file_format,
+                    overwrite=overwrite,
+                )
+            )
+            turn_motif_output_paths[state_key] = turn_motif_path
         if secondary_structure is not None:
             _emit_progress(
                 progress,
@@ -822,6 +1052,15 @@ def write_bp5_nanoring_series(
                     f"{len(rotamer_placement.accepted_secondary_structure_states)}/"
                     f"{len(rotamer_placement.secondary_structure_states)} "
                     f"{secondary_structure} state(s)"
+                ),
+            )
+        if turn_motif_definitions:
+            _emit_progress(
+                progress,
+                (
+                    f"[{m_index}/{len(m_values)}] M={m}: accepted "
+                    f"{len(rotamer_placement.accepted_turn_motif_states)}/"
+                    f"{len(rotamer_placement.turn_motif_states)} turn-motif state(s)"
                 ),
             )
         if write_reports:
@@ -846,6 +1085,15 @@ def write_bp5_nanoring_series(
                     output_paths=secondary_structure_output_paths,
                 )
             )
+            turn_motif_report_rows.extend(
+                _turn_motif_report_rows(
+                    placement=rotamer_placement,
+                    units=units,
+                    anchor_phase_offset=anchor_phase_offset,
+                    snap_virtual_carbons=snap_virtual_carbons,
+                    output_paths=turn_motif_output_paths,
+                )
+            )
         run_summaries.append(
             {
                 "m": m,
@@ -859,6 +1107,10 @@ def write_bp5_nanoring_series(
                 ),
                 "secondary_structure_states_accepted": len(
                     rotamer_placement.accepted_secondary_structure_states
+                ),
+                "turn_motif_states_scanned": len(rotamer_placement.turn_motif_states),
+                "turn_motif_states_accepted": len(
+                    rotamer_placement.accepted_turn_motif_states
                 ),
             }
         )
@@ -880,6 +1132,14 @@ def write_bp5_nanoring_series(
             rows=secondary_structure_report_rows,
             overwrite=overwrite,
         )
+        turn_motif_report_path = report_output_dir / "turn_motif_scores.csv"
+        if turn_motif_definitions:
+            _write_csv_report(
+                path=turn_motif_report_path,
+                fieldnames=TURN_MOTIF_REPORT_FIELDS,
+                rows=turn_motif_report_rows,
+                overwrite=overwrite,
+            )
         _write_json_report(
             path=run_metadata_path,
             data={
@@ -930,14 +1190,29 @@ def write_bp5_nanoring_series(
                     secondary_structure_cylinder_radius
                 ),
                 "secondary_structure_cylinder_radius_unit": "Angstrom",
+                "turn_motifs": [
+                    definition.motif_type for definition in turn_motif_definitions
+                ],
+                "turn_bp5_position": turn_bp5_position,
+                "turn_scan_limit": turn_scan_limit,
+                "available_turn_motif_states": len(
+                    DEFAULT_BP5_CHI_ROTAMERS
+                )
+                * _turn_motif_offset_count(
+                    motif_definitions=turn_motif_definitions,
+                    turn_bp5_position=turn_bp5_position,
+                )
+                if turn_motif_definitions
+                else 0,
                 "available_rotamer_states": len(DEFAULT_BP5_CHI_ROTAMERS),
                 "summaries": run_summaries,
             },
             overwrite=overwrite,
         )
-        written_paths.extend(
-            [rotamer_report_path, secondary_structure_report_path, run_metadata_path]
-        )
+        written_paths.extend([rotamer_report_path, secondary_structure_report_path])
+        if turn_motif_definitions:
+            written_paths.append(turn_motif_report_path)
+        written_paths.append(run_metadata_path)
         _emit_progress(progress, f"Wrote reports under {report_output_dir}")
     return written_paths
 
@@ -1127,6 +1402,155 @@ def _secondary_structure_report_rows(
     return rows
 
 
+def _turn_motif_report_rows(
+    placement: BP5NanoringRotamerPlacement,
+    units: float | int,
+    anchor_phase_offset: int,
+    snap_virtual_carbons: bool,
+    output_paths: dict[str, Path],
+) -> list[dict[str, object]]:
+    accepted_keys = {
+        _turn_motif_state_key(state)
+        for state in placement.accepted_turn_motif_states
+    }
+    scan_index_by_name = {
+        _turn_motif_state_key(state): scan_index
+        for scan_index, state in enumerate(placement.turn_motif_states, start=1)
+    }
+    score_rank_by_name = {
+        _turn_motif_state_key(state): score_rank
+        for score_rank, state in enumerate(
+            sorted(placement.turn_motif_states, key=_turn_motif_state_score_key),
+            start=1,
+        )
+    }
+    rows: list[dict[str, object]] = []
+    for state in placement.turn_motif_states:
+        state_key = _turn_motif_state_key(state)
+        motif_definition = state.motif_definition
+        for candidate in state.candidates:
+            residue_id = candidate.rotamer_candidate.residue_id
+            anchor_pair = placement.anchor_pairs[residue_id - 1]
+            metrics = candidate.orientation_metrics
+            rows.append(
+                {
+                    "m": placement.m,
+                    "units": units,
+                    "anchor_phase_offset": anchor_phase_offset,
+                    "snap_virtual_carbons": snap_virtual_carbons,
+                    "motif_type": motif_definition.motif_type,
+                    "motif_length": motif_definition.length,
+                    "bp5_motif_offset": state.bp5_motif_offset,
+                    "turn_label": motif_definition.label,
+                    "turn_previous_name": motif_definition.previous_name or "",
+                    "turn_source": motif_definition.source,
+                    "turn_phi_psi_r2": _turn_phi_psi_report_value(
+                        motif_definition,
+                        residue_offset=2,
+                    ),
+                    "turn_phi_psi_r3": _turn_phi_psi_report_value(
+                        motif_definition,
+                        residue_offset=3,
+                    ),
+                    "turn_middle_phi_psi": (
+                        _turn_phi_psi_report_value(motif_definition, residue_offset=2)
+                        if motif_definition.length == 3
+                        else ""
+                    ),
+                    "turn_contains_positive_phi_for_bp5": (
+                        _turn_contains_positive_phi_for_bp5(
+                            motif_definition=motif_definition,
+                            bp5_motif_offset=state.bp5_motif_offset,
+                        )
+                    ),
+                    "turn_requires_cis_peptide": motif_definition.requires_cis_peptide,
+                    "residue_id": residue_id,
+                    "anchor_angle_degrees": anchor_pair.angular_midpoint_degrees,
+                    "rotamer_name": candidate.rotamer_candidate.rotamer.name,
+                    "state_scan_index": scan_index_by_name[state_key],
+                    "state_score_rank": score_rank_by_name[state_key],
+                    "accepted": state_key in accepted_keys,
+                    "cylinder_intrusion_count": (
+                        state.cylinder_intrusion_score.intruding_atom_count
+                    ),
+                    "cylinder_intrusion_count_per_site": (
+                        state.cylinder_intrusion_score.intruding_atom_count
+                        / len(state.candidates)
+                    ),
+                    "cylinder_total_intrusion_depth": (
+                        state.cylinder_intrusion_score.total_intrusion_depth
+                    ),
+                    "cylinder_total_intrusion_depth_per_site": (
+                        state.cylinder_intrusion_score.total_intrusion_depth
+                        / len(state.candidates)
+                    ),
+                    "cylinder_max_intrusion_depth": (
+                        state.cylinder_intrusion_score.max_intrusion_depth
+                    ),
+                    "cylinder_radius": state.cylinder_intrusion_score.radius,
+                    "cylinder_z_min": state.cylinder_intrusion_score.z_min,
+                    "cylinder_z_max": state.cylinder_intrusion_score.z_max,
+                    "turn_motif_clash_score": state.clash_score,
+                    "turn_motif_clash_score_per_site": (
+                        _state_clash_score_per_site(state)
+                    ),
+                    "scaffold_clash_score": state.scaffold_clash_score,
+                    "scaffold_clash_score_per_site": (
+                        state.scaffold_clash_score / len(state.candidates)
+                    ),
+                    "bp5_clash_score": state.bp5_clash_score,
+                    "bp5_clash_score_per_site": (
+                        state.bp5_clash_score / len(state.candidates)
+                    ),
+                    "neighboring_backbone_clash_score": (
+                        state.neighboring_backbone_clash_score
+                    ),
+                    "neighboring_backbone_clash_score_per_site": (
+                        state.neighboring_backbone_clash_score
+                        / len(state.candidates)
+                    ),
+                    **_vector_report_columns(
+                        "secondary_structure_direction",
+                        metrics.secondary_structure_direction,
+                    ),
+                    **_vector_report_columns(
+                        "n_terminal_exit_vector",
+                        metrics.n_terminal_exit_vector,
+                    ),
+                    **_vector_report_columns(
+                        "c_terminal_exit_vector",
+                        metrics.c_terminal_exit_vector,
+                    ),
+                    "radial_alignment": metrics.radial_alignment,
+                    "tangential_alignment": metrics.tangential_alignment,
+                    "axial_alignment": metrics.axial_alignment,
+                    "output_path": str(output_paths.get(state_key, "")),
+                }
+            )
+    return rows
+
+
+def _turn_phi_psi_report_value(
+    motif_definition: TurnMotifDefinition,
+    residue_offset: int,
+) -> str:
+    for targets in motif_definition.residue_torsions:
+        if targets.residue_offset == residue_offset:
+            return f"{targets.phi_degrees},{targets.psi_degrees}"
+    return ""
+
+
+def _turn_contains_positive_phi_for_bp5(
+    motif_definition: TurnMotifDefinition,
+    bp5_motif_offset: int,
+) -> bool:
+    for targets in motif_definition.residue_torsions:
+        if targets.residue_offset != bp5_motif_offset:
+            continue
+        return targets.phi_degrees is not None and targets.phi_degrees > 0.0
+    return False
+
+
 def _vector_report_columns(prefix: str, vector: np.ndarray) -> dict[str, float]:
     return {
         f"{prefix}_x": float(vector[0]),
@@ -1302,8 +1726,31 @@ def _select_symmetric_secondary_states(
     return tuple(sorted(accepted_groups, key=_secondary_state_score_key))
 
 
+def _select_symmetric_turn_motif_states(
+    states: tuple[BP5SymmetricTurnMotifState, ...],
+    clash_cutoff: float | None,
+    cylinder_filter: bool,
+) -> tuple[BP5SymmetricTurnMotifState, ...]:
+    accepted_groups = [
+        state
+        for state in states
+        if clash_cutoff is None or _state_clash_score_per_site(state) <= clash_cutoff
+    ]
+    if cylinder_filter:
+        accepted_groups = [
+            state
+            for state in accepted_groups
+            if state.cylinder_intrusion_score.passes
+        ]
+    return tuple(sorted(accepted_groups, key=_turn_motif_state_score_key))
+
+
 def _state_clash_score_per_site(
-    state: BP5SymmetricRotamerState | BP5SymmetricSecondaryStructureState,
+    state: (
+        BP5SymmetricRotamerState
+        | BP5SymmetricSecondaryStructureState
+        | BP5SymmetricTurnMotifState
+    ),
 ) -> float:
     return float(state.clash_score / len(state.candidates))
 
@@ -1327,10 +1774,59 @@ def _flatten_secondary_structure_states(
     )
 
 
+def _flatten_turn_motif_states(
+    states: tuple[BP5SymmetricTurnMotifState, ...],
+) -> tuple[BP5TurnMotifPlacement, ...]:
+    state_rank = {
+        _turn_motif_state_key(state): rank
+        for rank, state in enumerate(states)
+    }
+    return tuple(
+        sorted(
+            (
+                candidate
+                for state in states
+                for candidate in state.candidates
+            ),
+            key=lambda candidate: (
+                candidate.rotamer_candidate.residue_id,
+                state_rank[
+                    (
+                        f"{candidate.rotamer_candidate.rotamer.name}_"
+                        f"{candidate.segment.motif_type}_"
+                        f"bp5pos{candidate.segment.bp5_motif_offset}"
+                    )
+                ],
+            ),
+        )
+    )
+
+
 def _secondary_state_score_key(
     state: BP5SymmetricSecondaryStructureState,
 ) -> tuple[float, str]:
     return (state.clash_score, _secondary_state_key(state))
+
+
+def _turn_motif_state_score_key(
+    state: BP5SymmetricTurnMotifState,
+) -> tuple[float, str]:
+    return (state.clash_score, _turn_motif_state_key(state))
+
+
+def _turn_motif_state_key(state: BP5SymmetricTurnMotifState) -> str:
+    return (
+        f"{state.rotamer_name}_{state.motif_definition.motif_type}"
+        f"_bp5pos{state.bp5_motif_offset}"
+    )
+
+
+def _turn_motif_output_filename(
+    m: int,
+    state: BP5SymmetricTurnMotifState,
+    file_format: str,
+) -> str:
+    return f"nanoring_M{m}_{_turn_motif_state_key(state)}.{file_format}"
 
 
 def _secondary_structure_torsion_targets(
@@ -1345,6 +1841,99 @@ def _secondary_structure_torsion_targets(
         step_degrees=phi_psi_step_degrees,
         ramachandran_level=ramachandran_level,
     )
+
+
+def _turn_motif_definitions(
+    turn_motifs: Iterable[TurnMotifType],
+    include_cis_turns: bool,
+) -> tuple[TurnMotifDefinition, ...]:
+    if include_cis_turns:
+        raise ValueError(
+            "cis-peptide turn classes are not implemented yet; omega and "
+            "residue identity constraints must be added first"
+        )
+    definitions = tuple(
+        require_turn_motif_definition(motif_type)
+        for motif_type in turn_motifs
+    )
+    cis_definitions = [
+        definition.motif_type
+        for definition in definitions
+        if definition.requires_cis_peptide
+    ]
+    if cis_definitions:
+        raise ValueError(
+            f"cis-peptide turn motifs are not implemented yet: {cis_definitions}"
+        )
+    return definitions
+
+
+def _turn_motif_scan_inputs(
+    rotamer_states: tuple[BP5SymmetricRotamerState, ...],
+    motif_definitions: tuple[TurnMotifDefinition, ...],
+    turn_bp5_position: str | int,
+) -> tuple[tuple[BP5SymmetricRotamerState, TurnMotifDefinition, int], ...]:
+    inputs: list[tuple[BP5SymmetricRotamerState, TurnMotifDefinition, int]] = []
+    for rotamer_state in rotamer_states:
+        for motif_definition in motif_definitions:
+            for offset in _turn_motif_bp5_offsets(
+                motif_definition,
+                turn_bp5_position,
+            ):
+                inputs.append((rotamer_state, motif_definition, offset))
+    return tuple(inputs)
+
+
+def _turn_motif_offset_count(
+    motif_definitions: tuple[TurnMotifDefinition, ...],
+    turn_bp5_position: str | int,
+) -> int:
+    return sum(
+        len(_turn_motif_bp5_offsets(motif_definition, turn_bp5_position))
+        for motif_definition in motif_definitions
+    )
+
+
+def _turn_motif_bp5_offsets(
+    motif_definition: TurnMotifDefinition,
+    turn_bp5_position: str | int,
+) -> tuple[int, ...]:
+    if isinstance(turn_bp5_position, int):
+        offsets = (turn_bp5_position,)
+    elif turn_bp5_position == "central":
+        offsets = motif_definition.central_bp5_offsets
+    elif turn_bp5_position == "all":
+        offsets = motif_definition.central_bp5_offsets
+    else:
+        try:
+            offsets = (int(turn_bp5_position),)
+        except ValueError as error:
+            raise ValueError(
+                "turn_bp5_position must be 'central', 'all', or a 1-based offset"
+            ) from error
+
+    invalid_offsets = [
+        offset
+        for offset in offsets
+        if offset < 1 or offset > motif_definition.length
+    ]
+    if invalid_offsets:
+        raise ValueError(
+            f"BP5 motif offsets must be within 1..{motif_definition.length}: "
+            f"{invalid_offsets}"
+        )
+    if turn_bp5_position != "all":
+        disallowed_offsets = [
+            offset
+            for offset in offsets
+            if offset not in motif_definition.central_bp5_offsets
+        ]
+        if disallowed_offsets:
+            raise ValueError(
+                f"BP5 motif offsets for {motif_definition.motif_type} must be "
+                f"one of {motif_definition.central_bp5_offsets}: {disallowed_offsets}"
+            )
+    return offsets
 
 
 def _secondary_structure_scan_inputs(
@@ -1449,6 +2038,87 @@ def _build_symmetric_secondary_structure_states(
     return tuple(states)
 
 
+def _build_symmetric_turn_motif_states(
+    turn_motif_scan_inputs: tuple[
+        tuple[BP5SymmetricRotamerState, TurnMotifDefinition, int],
+        ...,
+    ],
+    nanoring: struc.AtomArray,
+    anchor_pairs: tuple[NanoringAnchorPair, ...],
+    starting_atom_id: int,
+    cylinder_radius: float | None,
+) -> tuple[BP5SymmetricTurnMotifState, ...]:
+    states: list[BP5SymmetricTurnMotifState] = []
+    for rotamer_state, motif_definition, bp5_motif_offset in turn_motif_scan_inputs:
+        segment_pairs: list[tuple[BP5RotamerPlacement, TurnMotifSegment]] = []
+        next_atom_id = starting_atom_id
+        for candidate in rotamer_state.candidates:
+            segment_span = motif_definition.length
+            segment = build_turn_motif_segment(
+                bp5_rotamer=candidate,
+                motif_type=motif_definition.motif_type,
+                bp5_motif_offset=bp5_motif_offset,
+                starting_residue_id=1 + (candidate.residue_id - 1) * segment_span,
+                starting_atom_id=next_atom_id,
+            )
+            next_atom_id += segment.atom_array.array_length()
+            segment_pairs.append((candidate, segment))
+
+        symmetric_segment_pairs = tuple(
+            sorted(segment_pairs, key=lambda pair: pair[0].residue_id)
+        )
+        score = _score_symmetric_secondary_structure_state(
+            segment_pairs=symmetric_segment_pairs,
+            nanoring=nanoring,
+            anchor_pairs=anchor_pairs,
+            cylinder_radius=cylinder_radius,
+        )
+        scored_candidates: list[BP5TurnMotifPlacement] = []
+        for candidate, segment in symmetric_segment_pairs:
+            anchor_pair = anchor_pairs[candidate.residue_id - 1]
+            orientation_metrics = measure_secondary_structure_orientation(
+                segment=segment,
+                radial_direction=anchor_pair.radial_direction,
+                tangential_direction=anchor_pair.tangential_direction,
+                ring_axis=anchor_pair.ring_axis,
+            )
+            cylinder_intrusion_score = score_nanoring_cylinder_intrusions(
+                atom_array=segment.atom_array,
+                nanoring=nanoring,
+                cylinder_radius=cylinder_radius,
+            )
+            scored_candidates.append(
+                BP5TurnMotifPlacement(
+                    rotamer_candidate=candidate,
+                    segment=segment,
+                    orientation_metrics=orientation_metrics,
+                    scaffold_clash_score=score.clash_score.scaffold_score,
+                    bp5_clash_score=score.clash_score.bp5_score,
+                    neighboring_backbone_clash_score=(
+                        score.clash_score.neighboring_backbone_score
+                    ),
+                    clash_score=score.clash_score.total_overlap_score,
+                    cylinder_intrusion_score=cylinder_intrusion_score,
+                )
+            )
+        states.append(
+            BP5SymmetricTurnMotifState(
+                rotamer_name=rotamer_state.rotamer_name,
+                motif_definition=motif_definition,
+                bp5_motif_offset=bp5_motif_offset,
+                candidates=tuple(scored_candidates),
+                scaffold_clash_score=score.clash_score.scaffold_score,
+                bp5_clash_score=score.clash_score.bp5_score,
+                neighboring_backbone_clash_score=(
+                    score.clash_score.neighboring_backbone_score
+                ),
+                clash_score=score.clash_score.total_overlap_score,
+                cylinder_intrusion_score=score.cylinder_intrusion_score,
+            ),
+        )
+    return tuple(states)
+
+
 def _score_bp5_atom_group(
     atom_arrays: tuple[struc.AtomArray, ...],
     nanoring: struc.AtomArray,
@@ -1471,7 +2141,10 @@ def _score_bp5_atom_group(
 
 
 def _score_symmetric_secondary_structure_state(
-    segment_pairs: tuple[tuple[BP5RotamerPlacement, SecondaryStructureSegment], ...],
+    segment_pairs: tuple[
+        tuple[BP5RotamerPlacement, SecondaryStructureSegment | TurnMotifSegment],
+        ...,
+    ],
     nanoring: struc.AtomArray,
     anchor_pairs: tuple[NanoringAnchorPair, ...],
     cylinder_radius: float | None,
@@ -1604,7 +2277,9 @@ def _score_atom_array_pairs(atom_arrays: tuple[struc.AtomArray, ...]) -> float:
     return float(score)
 
 
-def _bp5_segment_atoms(segment: SecondaryStructureSegment) -> struc.AtomArray:
+def _bp5_segment_atoms(
+    segment: SecondaryStructureSegment | TurnMotifSegment,
+) -> struc.AtomArray:
     return _without_atom_names(
         segment.atom_array[segment.atom_array.res_id == segment.bp5_residue_id],
         BP5_VIRTUAL_CARBON_ATOMS,
@@ -1612,7 +2287,7 @@ def _bp5_segment_atoms(segment: SecondaryStructureSegment) -> struc.AtomArray:
 
 
 def _bp5_segment_non_backbone_atoms(
-    segment: SecondaryStructureSegment,
+    segment: SecondaryStructureSegment | TurnMotifSegment,
 ) -> struc.AtomArray:
     return _without_atom_names(
         _bp5_segment_atoms(segment),
@@ -1620,7 +2295,9 @@ def _bp5_segment_non_backbone_atoms(
     )
 
 
-def _generated_segment_atoms(segment: SecondaryStructureSegment) -> struc.AtomArray:
+def _generated_segment_atoms(
+    segment: SecondaryStructureSegment | TurnMotifSegment,
+) -> struc.AtomArray:
     return segment.atom_array[segment.atom_array.res_id != segment.bp5_residue_id]
 
 
@@ -1915,6 +2592,41 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--turn-motif",
+        choices=sorted(TURN_MOTIF_DEFINITIONS),
+        nargs="+",
+        default=None,
+        help=(
+            "Also write turn-motif segment complexes under turn_motif/. "
+            "If omitted, no turn motifs are scanned."
+        ),
+    )
+    parser.add_argument(
+        "--turn-bp5-position",
+        default="central",
+        help=(
+            "BP5 motif position to scan: 'central', 'all', or an explicit "
+            "1-based motif offset. Defaults to central."
+        ),
+    )
+    parser.add_argument(
+        "--turn-scan-limit",
+        type=int,
+        default=None,
+        help=(
+            "Only scan the first N deterministic turn-motif states. Defaults "
+            "to the global --scan-limit when omitted."
+        ),
+    )
+    parser.add_argument(
+        "--include-cis-turns",
+        action="store_true",
+        help=(
+            "Request cis-peptide turn classes. This currently fails until "
+            "omega and residue identity constraints are implemented."
+        ),
+    )
+    parser.add_argument(
         "--residues-before",
         type=int,
         default=DEFAULT_SECONDARY_STRUCTURE_RESIDUES_BEFORE,
@@ -1981,6 +2693,12 @@ def main(argv: list[str] | None = None) -> int:
             not args.allow_secondary_structure_cylinder_intrusions
         ),
         secondary_structure_cylinder_radius=args.secondary_structure_cylinder_radius,
+        turn_motifs=tuple(args.turn_motif or ()),
+        turn_bp5_position=args.turn_bp5_position,
+        turn_scan_limit=(
+            args.scan_limit if args.turn_scan_limit is None else args.turn_scan_limit
+        ),
+        include_cis_turns=args.include_cis_turns,
         progress=lambda message: print(message, file=sys.stderr),
     )
     for path in written_paths:

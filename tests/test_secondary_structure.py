@@ -18,8 +18,11 @@ from swacanatase.secondary_structure import (
     RAMACHANDRAN_DISALLOWED,
     RAMACHANDRAN_FAVORED,
     SECONDARY_STRUCTURE_TARGETS,
+    TRANS_PEPTIDE_OMEGA_DEGREES,
+    TURN_MOTIF_DEFINITIONS,
     BackboneTorsionTargets,
     build_regular_secondary_structure_segment,
+    build_turn_motif_segment,
     measure_secondary_structure_orientation,
     phi_psi_grid_values,
     score_nanoring_cylinder_intrusions,
@@ -331,6 +334,95 @@ def test_secondary_structure_orientation_reports_frame_and_exit_vectors() -> Non
     )
     assert np.allclose(metrics.n_terminal_exit_vector, expected_n_exit)
     assert np.allclose(metrics.c_terminal_exit_vector, expected_c_exit)
+
+
+def test_turn_motif_definitions_have_valid_bp5_offsets() -> None:
+    assert TURN_MOTIF_DEFINITIONS
+    for motif_definition in TURN_MOTIF_DEFINITIONS.values():
+        assert motif_definition.length in {3, 4}
+        assert all(
+            1 <= offset <= motif_definition.length
+            for offset in motif_definition.central_bp5_offsets
+        )
+        assert all(
+            np.isclose(target.omega_after_degrees, TRANS_PEPTIDE_OMEGA_DEGREES)
+            for target in motif_definition.residue_torsions
+            if not motif_definition.requires_cis_peptide
+        )
+
+
+def test_beta_turn_builder_places_bp5_at_requested_central_offset() -> None:
+    bp5_rotamer = _first_bp5_rotamer()
+
+    offset_2 = build_turn_motif_segment(
+        bp5_rotamer,
+        motif_type="beta_turn_ad",
+        bp5_motif_offset=2,
+    )
+    offset_3 = build_turn_motif_segment(
+        bp5_rotamer,
+        motif_type="beta_turn_ad",
+        bp5_motif_offset=3,
+    )
+
+    assert len(set(offset_2.atom_array.res_id.tolist())) == 4
+    assert len(set(offset_3.atom_array.res_id.tolist())) == 4
+    assert offset_2.bp5_residue_id == 2
+    assert offset_3.bp5_residue_id == 3
+    assert _residue(offset_2.atom_array, 2).res_name[0] == "BP5"
+    assert _residue(offset_3.atom_array, 3).res_name[0] == "BP5"
+
+
+def test_generated_beta_turn_geometry_matches_targets() -> None:
+    segment = build_turn_motif_segment(
+        _first_bp5_rotamer(),
+        motif_type="beta_turn_ad",
+        bp5_motif_offset=2,
+    )
+    motif_definition = TURN_MOTIF_DEFINITIONS["beta_turn_ad"]
+    targets_by_offset = {
+        target.residue_offset: target
+        for target in motif_definition.residue_torsions
+    }
+
+    for residue_id in (2, 3):
+        residue = _residue(segment.atom_array, residue_id)
+        previous_residue = _residue(segment.atom_array, residue_id - 1)
+        next_residue = _residue(segment.atom_array, residue_id + 1)
+        targets = targets_by_offset[residue_id]
+        assert _angle_close(
+            _dihedral(previous_residue, "C", residue, "N", residue, "CA", residue, "C"),
+            targets.phi_degrees,
+        )
+        assert _angle_close(
+            _dihedral(residue, "N", residue, "CA", residue, "C", next_residue, "N"),
+            targets.psi_degrees,
+        )
+
+
+def test_gamma_turn_builder_places_bp5_at_middle_position() -> None:
+    segment = build_turn_motif_segment(
+        _first_bp5_rotamer(),
+        motif_type="gamma_turn_inverse",
+        bp5_motif_offset=2,
+    )
+    motif_definition = TURN_MOTIF_DEFINITIONS["gamma_turn_inverse"]
+    targets = motif_definition.residue_torsions[0]
+    residue = _residue(segment.atom_array, 2)
+    previous_residue = _residue(segment.atom_array, 1)
+    next_residue = _residue(segment.atom_array, 3)
+
+    assert len(set(segment.atom_array.res_id.tolist())) == 3
+    assert segment.bp5_residue_id == 2
+    assert residue.res_name[0] == "BP5"
+    assert _angle_close(
+        _dihedral(previous_residue, "C", residue, "N", residue, "CA", residue, "C"),
+        targets.phi_degrees,
+    )
+    assert _angle_close(
+        _dihedral(residue, "N", residue, "CA", residue, "C", next_residue, "N"),
+        targets.psi_degrees,
+    )
 
 
 def _first_bp5_rotamer():

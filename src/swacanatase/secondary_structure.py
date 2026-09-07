@@ -11,6 +11,19 @@ from .bp5_rotamers import BP5RotamerPlacement
 from .clashes import score_heavy_atom_clashes
 
 SecondaryStructureType = Literal["alpha_helix", "beta_strand"]
+TurnMotifType = Literal[
+    "beta_turn_ad",
+    "beta_turn_pd",
+    "beta_turn_pa",
+    "beta_turn_ad_prime",
+    "beta_turn_pd_prime",
+    "beta_turn_ab1",
+    "beta_turn_ab2",
+    "beta_turn_az",
+    "beta_turn_ag",
+    "gamma_turn_inverse",
+    "gamma_turn_classic",
+]
 RamachandranLevel = Literal["favored", "allowed"]
 
 BACKBONE_ATOM_NAMES = ("N", "CA", "C", "O")
@@ -44,6 +57,26 @@ class BackboneTorsionTargets:
 
 
 @dataclass(frozen=True)
+class ResidueTorsionTargets:
+    residue_offset: int
+    phi_degrees: float | None
+    psi_degrees: float | None
+    omega_after_degrees: float = TRANS_PEPTIDE_OMEGA_DEGREES
+
+
+@dataclass(frozen=True)
+class TurnMotifDefinition:
+    motif_type: TurnMotifType
+    length: int
+    central_bp5_offsets: tuple[int, ...]
+    residue_torsions: tuple[ResidueTorsionTargets, ...]
+    label: str
+    previous_name: str | None = None
+    source: str = "classical"
+    requires_cis_peptide: bool = False
+
+
+@dataclass(frozen=True)
 class RamachandranBasin:
     """Sparse basin approximation used for deterministic phi/psi scans."""
 
@@ -65,6 +98,15 @@ class SecondaryStructureSegment:
     residues_before: int
     residues_after: int
     torsion_targets: BackboneTorsionTargets
+
+
+@dataclass(frozen=True)
+class TurnMotifSegment:
+    motif_type: TurnMotifType
+    atom_array: struc.AtomArray
+    bp5_residue_id: int
+    bp5_motif_offset: int
+    motif_definition: TurnMotifDefinition
 
 
 @dataclass(frozen=True)
@@ -113,6 +155,133 @@ class SecondaryStructureOrientationMetrics:
 SECONDARY_STRUCTURE_TARGETS: dict[SecondaryStructureType, BackboneTorsionTargets] = {
     "alpha_helix": BackboneTorsionTargets(phi_degrees=-60.0, psi_degrees=-45.0),
     "beta_strand": BackboneTorsionTargets(phi_degrees=-135.0, psi_degrees=135.0),
+}
+
+DEFAULT_TURN_MOTIF_TYPES: tuple[TurnMotifType, ...] = (
+    "beta_turn_ad",
+    "beta_turn_ab1",
+    "beta_turn_ab2",
+    "gamma_turn_inverse",
+)
+TURN_MOTIF_DEFINITIONS: dict[TurnMotifType, TurnMotifDefinition] = {
+    "beta_turn_ad": TurnMotifDefinition(
+        motif_type="beta_turn_ad",
+        length=4,
+        central_bp5_offsets=(2, 3),
+        residue_torsions=(
+            ResidueTorsionTargets(2, -60.0, -30.0),
+            ResidueTorsionTargets(3, -90.0, 0.0),
+        ),
+        label="AD beta turn",
+        previous_name="Type I",
+    ),
+    "beta_turn_pd": TurnMotifDefinition(
+        motif_type="beta_turn_pd",
+        length=4,
+        central_bp5_offsets=(2,),
+        residue_torsions=(
+            ResidueTorsionTargets(2, -60.0, 120.0),
+            ResidueTorsionTargets(3, 80.0, 0.0),
+        ),
+        label="PD beta turn",
+        previous_name="Type II",
+    ),
+    "beta_turn_pa": TurnMotifDefinition(
+        motif_type="beta_turn_pa",
+        length=4,
+        central_bp5_offsets=(2,),
+        residue_torsions=(
+            ResidueTorsionTargets(2, -60.0, 120.0),
+            ResidueTorsionTargets(3, 60.0, 30.0),
+        ),
+        label="PA beta turn",
+        previous_name="Type II",
+        source="BetaTurnLib18",
+    ),
+    "beta_turn_ad_prime": TurnMotifDefinition(
+        motif_type="beta_turn_ad_prime",
+        length=4,
+        central_bp5_offsets=(2, 3),
+        residue_torsions=(
+            ResidueTorsionTargets(2, 60.0, 30.0),
+            ResidueTorsionTargets(3, 90.0, 0.0),
+        ),
+        label="AD prime beta turn",
+        previous_name="Type I prime",
+    ),
+    "beta_turn_pd_prime": TurnMotifDefinition(
+        motif_type="beta_turn_pd_prime",
+        length=4,
+        central_bp5_offsets=(3,),
+        residue_torsions=(
+            ResidueTorsionTargets(2, 60.0, -120.0),
+            ResidueTorsionTargets(3, -80.0, 0.0),
+        ),
+        label="PD prime beta turn",
+        previous_name="Type II prime",
+    ),
+    "beta_turn_ab1": TurnMotifDefinition(
+        motif_type="beta_turn_ab1",
+        length=4,
+        central_bp5_offsets=(2, 3),
+        residue_torsions=(
+            ResidueTorsionTargets(2, -67.0, -31.0),
+            ResidueTorsionTargets(3, -136.0, 162.0),
+        ),
+        label="AB1 beta turn",
+        previous_name="Type VIII",
+        source="BetaTurnLib18",
+    ),
+    "beta_turn_ab2": TurnMotifDefinition(
+        motif_type="beta_turn_ab2",
+        length=4,
+        central_bp5_offsets=(2, 3),
+        residue_torsions=(
+            ResidueTorsionTargets(2, -69.0, -30.0),
+            ResidueTorsionTargets(3, -120.0, 128.0),
+        ),
+        label="AB2 beta turn",
+        previous_name="Type VIII",
+        source="BetaTurnLib18",
+    ),
+    "beta_turn_az": TurnMotifDefinition(
+        motif_type="beta_turn_az",
+        length=4,
+        central_bp5_offsets=(2, 3),
+        residue_torsions=(
+            ResidueTorsionTargets(2, -74.0, -28.0),
+            ResidueTorsionTargets(3, -140.0, 75.0),
+        ),
+        label="AZ beta turn",
+        previous_name="Type VIII",
+        source="BetaTurnLib18",
+    ),
+    "beta_turn_ag": TurnMotifDefinition(
+        motif_type="beta_turn_ag",
+        length=4,
+        central_bp5_offsets=(2, 3),
+        residue_torsions=(
+            ResidueTorsionTargets(2, -66.0, -19.0),
+            ResidueTorsionTargets(3, -82.0, 63.0),
+        ),
+        label="AG beta turn",
+        previous_name="Type VIII",
+        source="BetaTurnLib18",
+    ),
+    "gamma_turn_inverse": TurnMotifDefinition(
+        motif_type="gamma_turn_inverse",
+        length=3,
+        central_bp5_offsets=(2,),
+        residue_torsions=(ResidueTorsionTargets(2, -75.0, 65.0),),
+        label="inverse gamma turn",
+    ),
+    "gamma_turn_classic": TurnMotifDefinition(
+        motif_type="gamma_turn_classic",
+        length=3,
+        central_bp5_offsets=(2,),
+        residue_torsions=(ResidueTorsionTargets(2, 75.0, -65.0),),
+        label="classic gamma turn",
+    ),
 }
 
 RAMACHANDRAN_DISALLOWED = 0
@@ -341,11 +510,91 @@ def build_regular_secondary_structure_segment(
     )
 
 
+def build_turn_motif_segment(
+    bp5_rotamer: BP5RotamerPlacement | struc.AtomArray,
+    motif_type: TurnMotifType,
+    bp5_motif_offset: int,
+    chain_id: str = "A",
+    starting_residue_id: int = 1,
+    starting_atom_id: int = 1,
+) -> TurnMotifSegment:
+    """Grow a finite beta/gamma-turn motif around a fixed BP5 residue."""
+    motif_definition = require_turn_motif_definition(motif_type)
+    if bp5_motif_offset not in motif_definition.central_bp5_offsets:
+        raise ValueError(
+            f"bp5_motif_offset must be one of "
+            f"{motif_definition.central_bp5_offsets} for {motif_type}"
+        )
+
+    bp5 = (
+        bp5_rotamer.atom_array.copy()
+        if isinstance(bp5_rotamer, BP5RotamerPlacement)
+        else bp5_rotamer.copy()
+    )
+    _require_atom_names(bp5, ("N", "CA", "C", "O"))
+
+    bp5_residue_id = starting_residue_id + bp5_motif_offset - 1
+    torsions_by_offset = _turn_motif_torsions_by_offset(motif_definition)
+    backbone_coords = _grow_backbone_coordinates_from_residue_torsions(
+        bp5=bp5,
+        bp5_local_residue_id=bp5_motif_offset,
+        total_residues=motif_definition.length,
+        torsions_by_residue_id=torsions_by_offset,
+    )
+
+    arrays: list[struc.AtomArray] = []
+    next_atom_id = starting_atom_id
+    for local_residue_id in range(1, motif_definition.length + 1):
+        residue_id = starting_residue_id + local_residue_id - 1
+        previous_coords = backbone_coords.get(local_residue_id - 1)
+        next_coords = backbone_coords.get(local_residue_id + 1)
+        if local_residue_id == bp5_motif_offset:
+            prepared_bp5 = _prepare_bp5_residue(
+                bp5=bp5,
+                residue_id=residue_id,
+                chain_id=chain_id,
+                starting_atom_id=next_atom_id,
+                has_previous=local_residue_id > 1,
+                has_next=local_residue_id < motif_definition.length,
+                previous_coordinates=previous_coords,
+            )
+            arrays.append(prepared_bp5)
+        else:
+            arrays.append(
+                _new_backbone_residue(
+                    residue_id=residue_id,
+                    chain_id=chain_id,
+                    coordinates=backbone_coords[local_residue_id],
+                    previous_coordinates=previous_coords,
+                    next_coordinates=next_coords,
+                    starting_atom_id=next_atom_id,
+                )
+            )
+        next_atom_id += arrays[-1].array_length()
+
+    return TurnMotifSegment(
+        motif_type=motif_type,
+        atom_array=struc.concatenate(arrays),
+        bp5_residue_id=bp5_residue_id,
+        bp5_motif_offset=bp5_motif_offset,
+        motif_definition=motif_definition,
+    )
+
+
+def require_turn_motif_definition(
+    motif_type: TurnMotifType,
+) -> TurnMotifDefinition:
+    try:
+        return TURN_MOTIF_DEFINITIONS[motif_type]
+    except KeyError as error:
+        raise ValueError(f"unknown turn motif type {motif_type!r}") from error
+
+
 def score_secondary_structure_segment_clashes(
-    segment: SecondaryStructureSegment,
+    segment: SecondaryStructureSegment | TurnMotifSegment,
     nanoring: struc.AtomArray | None = None,
     bp5_context: struc.AtomArray | None = None,
-    neighboring_segments: Iterable[SecondaryStructureSegment] = (),
+    neighboring_segments: Iterable[SecondaryStructureSegment | TurnMotifSegment] = (),
 ) -> SecondaryStructureClashScore:
     """Score post-growth backbone clashes against scaffold, BP5, and neighbors."""
     backbone = _backbone_atoms(segment.atom_array)
@@ -448,7 +697,7 @@ def score_nanoring_cylinder_intrusions(
 
 
 def measure_secondary_structure_orientation(
-    segment: SecondaryStructureSegment,
+    segment: SecondaryStructureSegment | TurnMotifSegment,
     radial_direction: np.ndarray,
     tangential_direction: np.ndarray,
     ring_axis: np.ndarray,
@@ -568,21 +817,79 @@ def _grow_backbone_coordinates(
     targets: BackboneTorsionTargets,
 ) -> dict[int, dict[str, np.ndarray]]:
     bp5_residue_id = residues_before + 1
+    total_residues = residues_before + 1 + residues_after
+    torsions_by_residue_id = {
+        residue_id: ResidueTorsionTargets(
+            residue_offset=residue_id,
+            phi_degrees=targets.phi_degrees,
+            psi_degrees=targets.psi_degrees,
+        )
+        for residue_id in range(1, total_residues + 1)
+    }
+    return _grow_backbone_coordinates_from_residue_torsions(
+        bp5=bp5,
+        bp5_local_residue_id=bp5_residue_id,
+        total_residues=total_residues,
+        torsions_by_residue_id=torsions_by_residue_id,
+    )
+
+
+def _turn_motif_torsions_by_offset(
+    motif_definition: TurnMotifDefinition,
+) -> dict[int, ResidueTorsionTargets]:
+    defined_targets = {
+        target.residue_offset: target
+        for target in motif_definition.residue_torsions
+    }
+    fallback = SECONDARY_STRUCTURE_TARGETS["beta_strand"]
+    return {
+        residue_offset: ResidueTorsionTargets(
+            residue_offset=residue_offset,
+            phi_degrees=(
+                defined_targets[residue_offset].phi_degrees
+                if residue_offset in defined_targets
+                else fallback.phi_degrees
+            ),
+            psi_degrees=(
+                defined_targets[residue_offset].psi_degrees
+                if residue_offset in defined_targets
+                else fallback.psi_degrees
+            ),
+            omega_after_degrees=(
+                defined_targets[residue_offset].omega_after_degrees
+                if residue_offset in defined_targets
+                else TRANS_PEPTIDE_OMEGA_DEGREES
+            ),
+        )
+        for residue_offset in range(1, motif_definition.length + 1)
+    }
+
+
+def _grow_backbone_coordinates_from_residue_torsions(
+    bp5: struc.AtomArray,
+    bp5_local_residue_id: int,
+    total_residues: int,
+    torsions_by_residue_id: dict[int, ResidueTorsionTargets],
+) -> dict[int, dict[str, np.ndarray]]:
     bp5_coords = {
         atom_name: _atom_coord(bp5, atom_name).copy()
         for atom_name in BACKBONE_ATOM_NAMES
     }
-    coordinates: dict[int, dict[str, np.ndarray]] = {bp5_residue_id: bp5_coords}
+    coordinates: dict[int, dict[str, np.ndarray]] = {
+        bp5_local_residue_id: bp5_coords
+    }
 
-    for residue_id in range(bp5_residue_id - 1, 0, -1):
+    for residue_id in range(bp5_local_residue_id - 1, 0, -1):
         next_coords = coordinates[residue_id + 1]
+        residue_targets = torsions_by_residue_id[residue_id]
+        next_residue_targets = torsions_by_residue_id[residue_id + 1]
         c_coord = _place_internal_coordinate_atom(
             atom_1=next_coords["C"],
             atom_2=next_coords["CA"],
             atom_3=next_coords["N"],
             bond_length=C_N_BOND_LENGTH,
             bond_angle_degrees=C_N_CA_ANGLE_DEGREES,
-            dihedral_degrees=targets.phi_degrees,
+            dihedral_degrees=_required_phi(next_residue_targets),
         )
         ca_coord = _place_internal_coordinate_atom(
             atom_1=next_coords["CA"],
@@ -590,7 +897,7 @@ def _grow_backbone_coordinates(
             atom_3=c_coord,
             bond_length=CA_C_BOND_LENGTH,
             bond_angle_degrees=CA_C_N_ANGLE_DEGREES,
-            dihedral_degrees=TRANS_PEPTIDE_OMEGA_DEGREES,
+            dihedral_degrees=residue_targets.omega_after_degrees,
         )
         n_coord = _place_internal_coordinate_atom(
             atom_1=next_coords["N"],
@@ -598,7 +905,7 @@ def _grow_backbone_coordinates(
             atom_3=ca_coord,
             bond_length=N_CA_BOND_LENGTH,
             bond_angle_degrees=N_CA_C_ANGLE_DEGREES,
-            dihedral_degrees=targets.psi_degrees,
+            dihedral_degrees=_required_psi(residue_targets),
         )
         o_coord = _place_carbonyl_oxygen(n_coord, ca_coord, c_coord)
         coordinates[residue_id] = {
@@ -608,15 +915,17 @@ def _grow_backbone_coordinates(
             "O": o_coord,
         }
 
-    for residue_id in range(bp5_residue_id + 1, bp5_residue_id + residues_after + 1):
+    for residue_id in range(bp5_local_residue_id + 1, total_residues + 1):
         previous_coords = coordinates[residue_id - 1]
+        previous_residue_targets = torsions_by_residue_id[residue_id - 1]
+        residue_targets = torsions_by_residue_id[residue_id]
         n_coord = _place_internal_coordinate_atom(
             atom_1=previous_coords["N"],
             atom_2=previous_coords["CA"],
             atom_3=previous_coords["C"],
             bond_length=C_N_BOND_LENGTH,
             bond_angle_degrees=CA_C_N_ANGLE_DEGREES,
-            dihedral_degrees=targets.psi_degrees,
+            dihedral_degrees=_required_psi(previous_residue_targets),
         )
         ca_coord = _place_internal_coordinate_atom(
             atom_1=previous_coords["CA"],
@@ -624,7 +933,7 @@ def _grow_backbone_coordinates(
             atom_3=n_coord,
             bond_length=N_CA_BOND_LENGTH,
             bond_angle_degrees=C_N_CA_ANGLE_DEGREES,
-            dihedral_degrees=TRANS_PEPTIDE_OMEGA_DEGREES,
+            dihedral_degrees=previous_residue_targets.omega_after_degrees,
         )
         c_coord = _place_internal_coordinate_atom(
             atom_1=previous_coords["C"],
@@ -632,7 +941,7 @@ def _grow_backbone_coordinates(
             atom_3=ca_coord,
             bond_length=CA_C_BOND_LENGTH,
             bond_angle_degrees=N_CA_C_ANGLE_DEGREES,
-            dihedral_degrees=targets.phi_degrees,
+            dihedral_degrees=_required_phi(residue_targets),
         )
         o_coord = _place_carbonyl_oxygen(n_coord, ca_coord, c_coord)
         coordinates[residue_id] = {
@@ -643,6 +952,18 @@ def _grow_backbone_coordinates(
         }
 
     return coordinates
+
+
+def _required_phi(targets: ResidueTorsionTargets) -> float:
+    if targets.phi_degrees is None:
+        raise ValueError(f"residue {targets.residue_offset} is missing phi target")
+    return targets.phi_degrees
+
+
+def _required_psi(targets: ResidueTorsionTargets) -> float:
+    if targets.psi_degrees is None:
+        raise ValueError(f"residue {targets.residue_offset} is missing psi target")
+    return targets.psi_degrees
 
 
 def _place_carbonyl_oxygen(
@@ -938,7 +1259,9 @@ def _infer_nanoring_cylinder_radius(nanoring: struc.AtomArray) -> float:
     return float(radial_distances.min())
 
 
-def _generated_backbone_atoms(segment: SecondaryStructureSegment) -> struc.AtomArray:
+def _generated_backbone_atoms(
+    segment: SecondaryStructureSegment | TurnMotifSegment,
+) -> struc.AtomArray:
     atom_array = segment.atom_array
     return atom_array[
         (atom_array.res_id != segment.bp5_residue_id)
@@ -947,7 +1270,7 @@ def _generated_backbone_atoms(segment: SecondaryStructureSegment) -> struc.AtomA
 
 
 def _secondary_structure_direction(
-    segment: SecondaryStructureSegment,
+    segment: SecondaryStructureSegment | TurnMotifSegment,
 ) -> np.ndarray:
     residue_ids = _sorted_residue_ids(segment.atom_array)
     ca_coords = np.array(
@@ -980,7 +1303,7 @@ def _secondary_structure_direction(
 
 
 def _terminal_exit_vectors(
-    segment: SecondaryStructureSegment,
+    segment: SecondaryStructureSegment | TurnMotifSegment,
 ) -> tuple[np.ndarray, np.ndarray]:
     residue_ids = _sorted_residue_ids(segment.atom_array)
     bp5_residue = _residue(segment.atom_array, segment.bp5_residue_id)

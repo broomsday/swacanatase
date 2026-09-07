@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from swacanatase.active_site import (
     DEFAULT_PD_C_BOND_LENGTH,
@@ -14,6 +15,7 @@ from swacanatase.placement import (
     central_para_linker_anchor_pairs,
     generate_m_equals_n_nanoring,
     generate_m_equals_n_nanorings,
+    place_bp5_rotamer_ensembles_around_nanoring,
     main as placement_main,
     place_bp5_sidechains_around_nanoring,
     write_bp5_nanoring_series,
@@ -380,6 +382,84 @@ def test_placement_cli_exposes_rotamer_and_secondary_structure_output_modes(
     assert (tmp_path / "reports" / "run_metadata.json").is_file()
     assert len(list((tmp_path / "rotamers").glob("*.cif"))) == 1
     assert len(list((tmp_path / "secondary_structure").glob("*.cif"))) == 1
+
+
+def test_turn_motif_segments_reuse_clash_and_cylinder_scoring() -> None:
+    placement = place_bp5_rotamer_ensembles_around_nanoring(
+        m=18,
+        cif_path=Path("data/rcsb/BP5.cif"),
+        max_rotamers_per_site=1,
+        turn_motifs=("beta_turn_ad",),
+        turn_scan_limit=1,
+        secondary_structure_cylinder_filter=False,
+    )
+
+    assert len(placement.turn_motif_states) == 1
+    assert len(placement.turn_motif_candidates) == 9
+    state = placement.turn_motif_states[0]
+    assert state.motif_definition.motif_type == "beta_turn_ad"
+    assert state.bp5_motif_offset == 2
+    assert len(state.candidates) == 9
+    assert state.cylinder_intrusion_score.intruding_atom_count >= 0
+    assert state.cylinder_intrusion_score.radius > 0.0
+    assert np.isclose(
+        state.clash_score,
+        state.scaffold_clash_score
+        + state.bp5_clash_score
+        + state.neighboring_backbone_clash_score,
+    )
+
+
+def test_turn_motif_cli_writes_outputs_and_report(tmp_path: Path) -> None:
+    exit_code = placement_main(
+        [
+            "--m",
+            "18",
+            "--output-dir",
+            str(tmp_path),
+            "--overwrite",
+            "--write-reports",
+            "--scan-limit",
+            "1",
+            "--max-rotamers-per-site",
+            "1",
+            "--no-clash-cutoffs",
+            "--turn-motif",
+            "beta_turn_ad",
+            "--allow-secondary-structure-cylinder-intrusions",
+        ]
+    )
+
+    assert exit_code == 0
+    assert (tmp_path / "turn_motif").is_dir()
+    assert (tmp_path / "reports" / "turn_motif_scores.csv").is_file()
+    assert len(list((tmp_path / "turn_motif").glob("*.cif"))) == 1
+    with (tmp_path / "reports" / "turn_motif_scores.csv").open(newline="") as file:
+        rows = list(csv.DictReader(file))
+    with (tmp_path / "reports" / "run_metadata.json").open() as file:
+        metadata = json.load(file)
+
+    assert len(rows) == 9
+    assert {row["motif_type"] for row in rows} == {"beta_turn_ad"}
+    assert {row["bp5_motif_offset"] for row in rows} == {"2"}
+    assert {row["turn_phi_psi_r2"] for row in rows} == {"-60.0,-30.0"}
+    assert metadata["turn_motifs"] == ["beta_turn_ad"]
+    assert metadata["summaries"][0]["turn_motif_states_scanned"] == 1
+
+
+def test_cis_turns_are_rejected_until_supported(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="omega and residue identity constraints"):
+        placement_main(
+            [
+                "--m",
+                "18",
+                "--output-dir",
+                str(tmp_path),
+                "--turn-motif",
+                "beta_turn_ad",
+                "--include-cis-turns",
+            ]
+        )
 
 
 def _atom_coord(atom_array, atom_name: str) -> np.ndarray:
