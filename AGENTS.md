@@ -32,9 +32,16 @@ carbon nanohoop/nanotube scaffolds.
   geometry.
 - `src/swacanatase/nanoring.py`: wraps `tuber` armchair `(n,n)` generation and
   writing.
+- `src/swacanatase/bp5_rotamers.py`: enumerates deterministic BP5 chi1/chi2
+  rotamers while preserving the placed BP5/Pd anchor frame.
+- `src/swacanatase/secondary_structure.py`: builds regular alpha/beta backbone
+  segments and finite turn motifs around a fixed placed BP5 residue; owns
+  Ramachandran scan targets, BetaTurnLib18 turn definitions, turn perturbation
+  grids, cis-turn metadata, clash helpers, and orientation/cylinder metrics.
 - `src/swacanatase/placement.py`: generates M=N scaffolds, selects central-band
-  anchor pairs, places `M/2` BP5/Pd sidechains, and writes scaffold/theozyme
-  series.
+  anchor pairs, places `M/2` BP5/Pd sidechains, expands symmetric rotamer,
+  secondary-structure, and turn-motif states, and writes scaffold/theozyme,
+  rotamer, secondary-structure, turn-motif, and report series.
 
 ## Setup
 
@@ -79,6 +86,16 @@ uv run --extra dev pytest
   minimizes residuals against scaffold anchors. Use `snap_virtual_carbons` or
   `--snap-virtual-carbons` only for experiments that require exact `CV1`/`CV2`
   overlap with scaffold carbons.
+- Turn-motif anchoring keeps the placed BP5/Pd residue fixed on its nanoring
+  anchor pair and grows the finite motif around that fixed residue. Treat
+  `bp5_motif_offset`/`--turn-bp5-position` as the 1-based residue position of
+  BP5 within the 3-residue gamma turn or 4-residue beta turn.
+- Turn-motif scans expand complete symmetric states as rotamer state x motif x
+  BP5 motif offset. Default turn motifs are `beta_turn_ad`, `beta_turn_ab1`,
+  `beta_turn_ab2`, and `gamma_turn_inverse`; additional cis-turn motifs require
+  `--include-cis-turns`.
+- Cis-Pro turn motifs currently enforce fixed residue identity and non-trans
+  peptide omega values, but generated Pro residues are backbone-only.
 - Generated complexes use chain `A` for BP5/Pd sidechains and chain `B` for the
   carbon scaffold.
 - Prefer small, testable geometry functions over notebooks as the canonical
