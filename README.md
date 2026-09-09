@@ -22,8 +22,9 @@ Implemented pieces include:
   nanoring scaffolds.
 - Full symmetric BP5 chi-rotamer state scoring and optional full-state rotamer
   and secondary-structure outputs.
-- Canonical beta-turn and gamma-turn motif growth around placed BP5 rotamers,
-  with turn-specific scoring and reports.
+- Turn-anchored beta-turn and gamma-turn motif growth around placed BP5 rotamers,
+  including BetaTurnLib18 mode/medoid torsions, deterministic perturbation
+  scans, opt-in cis-turn classes, and turn-specific scoring/reports.
 
 ## Setup
 
@@ -164,10 +165,77 @@ Report outputs:
 - `data/generated/reports/turn_motif_scores.csv` when turn motifs are scanned
 - `data/generated/reports/run_metadata.json`
 
+Multiple scan modes can also be run from one TOML config file. Values in
+`[general]` apply to every scan; values in each `[[scans]]` table override the
+general value for that scan. Config runs write each scan under
+`data/generated/scans/<scan-name>/` and merge report CSVs under
+`data/generated/reports/` with `scan_name` and `scan_kind` columns.
+
+Example:
+
+```toml
+[general]
+m = [18, 24, 30, 36]
+units = 1.5
+output_dir = "data/generated"
+format = "cif"
+overwrite = true
+write_reports = true
+scan_limit = 2
+max_rotamers_per_site = 1
+enumerate_bp5_rotamers = true
+rotamer_clash_cutoff = 2.0
+secondary_structure_clash_cutoff = 2.0
+allow_secondary_structure_cylinder_intrusions = true
+
+[[scans]]
+name = "alpha_helix"
+kind = "secondary_structure"
+secondary_structure = "alpha_helix"
+residues_before = 3
+residues_after = 3
+
+[[scans]]
+name = "beta_strand"
+kind = "secondary_structure"
+secondary_structure = "beta_strand"
+residues_before = 3
+residues_after = 3
+
+[[scans]]
+name = "default_turns"
+kind = "turn_motif"
+turn_motifs = "default"
+turn_bp5_position = "central"
+
+[[scans]]
+name = "cis_turns"
+kind = "turn_motif"
+turn_motifs = "cis"
+include_cis_turns = true
+turn_bp5_position = "central"
+```
+
+Run it with:
+
+```bash
+uv run swacanatase-generate-bp5-nanorings --config scan.toml
+```
+
 Turn-motif scanning grows finite 3-residue gamma turns or 4-residue beta turns
-around each accepted symmetric BP5 rotamer state. Turn complexes are written
-under `data/generated/turn_motif/`, and reports reuse the same clash and
-nanoring-cylinder filters as regular secondary-structure scanning.
+around each accepted symmetric BP5 rotamer state. In this mode the already
+placed BP5/Pd residue remains anchored to its nanoring carbon pair through
+`CV1`/`CV2`; `--turn-bp5-position` selects the 1-based residue offset that BP5
+occupies inside the finite turn motif. The scan expands deterministic full-ring
+states as:
+
+```text
+BP5 chi-rotamer state x turn motif x BP5 motif offset
+```
+
+Turn complexes are written under `data/generated/turn_motif/`, and reports
+reuse the same clash and nanoring-cylinder filters as regular
+secondary-structure scanning.
 
 Example:
 
@@ -181,13 +249,16 @@ uv run swacanatase-generate-bp5-nanorings \
   --overwrite
 ```
 
-Use `--turn-bp5-position all` to scan every allowed BP5 offset for each motif,
-or pass an explicit 1-based offset such as `--turn-bp5-position 3`. Use
-`--turn-scan-limit N` to cap turn states independently; when omitted, the
-global `--scan-limit` is reused. Beta-turn motifs use BetaTurnLib18 modal
-torsions by default; pass `--turn-motif-torsions medoid` to use medoids.
-Small deterministic phi/psi scans can be enabled with
-`--turn-motif-perturbation-step` and `--turn-motif-perturbation-radius`.
+If `--turn-motif` is omitted, no turn motifs are scanned. The conservative
+default motif set available from Python is `beta_turn_ad`, `beta_turn_ab1`,
+`beta_turn_ab2`, and `gamma_turn_inverse`. Use `--turn-bp5-position all` to
+scan every allowed BP5 offset for each motif, or pass an explicit 1-based offset
+such as `--turn-bp5-position 3`. Use `--turn-scan-limit N` to cap turn states
+independently; when omitted, the global `--scan-limit` is reused. Beta-turn
+motifs use BetaTurnLib18 modal torsions by default; pass
+`--turn-motif-torsions medoid` to use medoids. Small deterministic phi/psi
+scans can be enabled with `--turn-motif-perturbation-step` and
+`--turn-motif-perturbation-radius`.
 
 Cis-Pro beta-turn classes are available only when explicitly requested with
 `--include-cis-turns`. Generated Pro residues are currently backbone-only but

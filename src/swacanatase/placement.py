@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import sys
+import tomllib
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
@@ -27,6 +28,7 @@ from .ligands import DEFAULT_LIGAND_DIR, load_bp5_bond_pairs
 from .nanoring import generate_armchair_nanoring
 from .secondary_structure import (
     BackboneTorsionTargets,
+    DEFAULT_TURN_MOTIF_TYPES,
     NanoringCylinderIntrusionScore,
     RamachandranLevel,
     SecondaryStructureClashScore,
@@ -188,6 +190,104 @@ TURN_MOTIF_REPORT_FIELDS = (
     "c_terminal_exit_vector_y",
     "c_terminal_exit_vector_z",
     "output_path",
+)
+CONFIG_REPORT_PREFIX_FIELDS = ("scan_name", "scan_kind")
+CONFIG_ROTAMER_REPORT_FIELDS = CONFIG_REPORT_PREFIX_FIELDS + ROTAMER_REPORT_FIELDS
+CONFIG_SECONDARY_STRUCTURE_REPORT_FIELDS = (
+    CONFIG_REPORT_PREFIX_FIELDS + SECONDARY_STRUCTURE_REPORT_FIELDS
+)
+CONFIG_TURN_MOTIF_REPORT_FIELDS = CONFIG_REPORT_PREFIX_FIELDS + TURN_MOTIF_REPORT_FIELDS
+
+CONFIG_TOP_LEVEL_KEYS = frozenset({"general", "defaults", "scans"})
+CONFIG_SCAN_NAME_KEYS = frozenset({"name", "kind"})
+CONFIG_SERIES_OPTION_KEYS = frozenset(
+    {
+        "output_dir",
+        "m_values",
+        "units",
+        "anchor_phase_offset",
+        "snap_virtual_carbons",
+        "file_format",
+        "overwrite",
+        "enumerate_bp5_rotamers",
+        "write_reports",
+        "rotamer_scan_limit",
+        "max_rotamers_per_site",
+        "rotamer_clash_cutoff",
+        "secondary_structure",
+        "secondary_structure_scan_limit",
+        "secondary_structure_phi_psi_step_degrees",
+        "secondary_structure_ramachandran_level",
+        "residues_before",
+        "residues_after",
+        "secondary_structure_clash_cutoff",
+        "secondary_structure_cylinder_filter",
+        "secondary_structure_cylinder_radius",
+        "turn_motifs",
+        "turn_bp5_position",
+        "turn_scan_limit",
+        "include_cis_turns",
+        "turn_motif_torsion_source",
+        "turn_motif_perturbation_step_degrees",
+        "turn_motif_perturbation_radius_degrees",
+    }
+)
+CONFIG_INTERNAL_OPTION_KEYS = frozenset(
+    {
+        "scan_limit",
+        "no_clash_cutoffs",
+        "allow_secondary_structure_cylinder_intrusions",
+    }
+)
+CONFIG_OPTION_ALIASES = {
+    "m": "m_values",
+    "format": "file_format",
+    "secondary_structure_phi_psi_step": "secondary_structure_phi_psi_step_degrees",
+    "turn_motif": "turn_motifs",
+    "turn_motif_torsions": "turn_motif_torsion_source",
+    "turn_motif_perturbation_step": "turn_motif_perturbation_step_degrees",
+    "turn_motif_perturbation_radius": "turn_motif_perturbation_radius_degrees",
+}
+CONFIG_ALLOWED_OPTION_KEYS = (
+    CONFIG_SCAN_NAME_KEYS
+    | CONFIG_SERIES_OPTION_KEYS
+    | CONFIG_INTERNAL_OPTION_KEYS
+    | frozenset(CONFIG_OPTION_ALIASES)
+)
+CONFIG_BOOL_OPTION_KEYS = frozenset(
+    {
+        "snap_virtual_carbons",
+        "overwrite",
+        "enumerate_bp5_rotamers",
+        "write_reports",
+        "secondary_structure_cylinder_filter",
+        "include_cis_turns",
+        "no_clash_cutoffs",
+        "allow_secondary_structure_cylinder_intrusions",
+    }
+)
+CONFIG_INT_OPTION_KEYS = frozenset(
+    {
+        "anchor_phase_offset",
+        "rotamer_scan_limit",
+        "scan_limit",
+        "max_rotamers_per_site",
+        "secondary_structure_scan_limit",
+        "residues_before",
+        "residues_after",
+        "turn_scan_limit",
+    }
+)
+CONFIG_FLOAT_OPTION_KEYS = frozenset(
+    {
+        "units",
+        "rotamer_clash_cutoff",
+        "secondary_structure_clash_cutoff",
+        "secondary_structure_cylinder_radius",
+        "secondary_structure_phi_psi_step_degrees",
+        "turn_motif_perturbation_step_degrees",
+        "turn_motif_perturbation_radius_degrees",
+    }
 )
 
 
@@ -394,6 +494,23 @@ class BP5NanoringRotamerPlacement:
     accepted_turn_motif_candidates: tuple[BP5TurnMotifPlacement, ...] = ()
     turn_motif_states: tuple[BP5SymmetricTurnMotifState, ...] = ()
     accepted_turn_motif_states: tuple[BP5SymmetricTurnMotifState, ...] = ()
+
+
+@dataclass(frozen=True)
+class BP5NanoringConfigScan:
+    """One resolved scan section from a BP5 nanoring TOML config."""
+
+    name: str
+    kind: str
+    output_dir: Path
+    series_options: dict[str, object]
+
+
+@dataclass(frozen=True)
+class BP5NanoringConfigScanResult:
+    scan: BP5NanoringConfigScan
+    written_paths: tuple[Path, ...]
+    metadata: dict[str, object]
 
 
 def generate_m_equals_n_nanoring(
@@ -1243,6 +1360,414 @@ def write_bp5_nanoring_series(
         written_paths.append(run_metadata_path)
         _emit_progress(progress, f"Wrote reports under {report_output_dir}")
     return written_paths
+
+
+def write_bp5_nanoring_config(
+    config_path: str | Path,
+    progress: Callable[[str], None] | None = None,
+) -> list[Path]:
+    """Run one or more BP5 nanoring scans described by a TOML config file."""
+    config_path = Path(config_path)
+    with config_path.open("rb") as file:
+        config_data = tomllib.load(file)
+
+    output_dir, scans = _bp5_nanoring_config_scans(config_data)
+    results: list[BP5NanoringConfigScanResult] = []
+    written_paths: list[Path] = []
+    for scan_index, scan in enumerate(scans, start=1):
+        _emit_progress(
+            progress,
+            (
+                f"[config {scan_index}/{len(scans)}] {scan.name}: "
+                f"running {scan.kind} scan"
+            ),
+        )
+        scan_written_paths = write_bp5_nanoring_series(
+            **scan.series_options,
+            progress=(
+                None
+                if progress is None
+                else lambda message, scan_name=scan.name: progress(
+                    f"[{scan_name}] {message}"
+                )
+            ),
+        )
+        written_paths.extend(scan_written_paths)
+        results.append(
+            BP5NanoringConfigScanResult(
+                scan=scan,
+                written_paths=tuple(scan_written_paths),
+                metadata=_config_scan_metadata(scan.output_dir),
+            )
+        )
+
+    report_paths = _write_config_reports(
+        config_path=config_path,
+        config_data=config_data,
+        output_dir=output_dir,
+        results=tuple(results),
+    )
+    written_paths.extend(report_paths)
+    return written_paths
+
+
+def _bp5_nanoring_config_scans(
+    config_data: dict[str, object],
+) -> tuple[Path, tuple[BP5NanoringConfigScan, ...]]:
+    unknown_top_level_keys = sorted(set(config_data) - CONFIG_TOP_LEVEL_KEYS)
+    if unknown_top_level_keys:
+        raise ValueError(f"unknown top-level config key(s): {unknown_top_level_keys}")
+    if "general" in config_data and "defaults" in config_data:
+        raise ValueError("use either [general] or [defaults], not both")
+
+    general_data = config_data.get("general", config_data.get("defaults", {}))
+    if not isinstance(general_data, dict):
+        raise ValueError("[general] must be a TOML table")
+    general_options = _normalize_config_options(general_data, context="[general]")
+    general_scan_keys = sorted(set(general_options) & CONFIG_SCAN_NAME_KEYS)
+    if general_scan_keys:
+        raise ValueError(f"[general]: scan-only key(s): {general_scan_keys}")
+    output_dir = Path(general_options.pop("output_dir", DEFAULT_GENERATED_DATA_DIR))
+
+    scan_data = config_data.get("scans")
+    if not isinstance(scan_data, list) or not scan_data:
+        raise ValueError("config must define at least one [[scans]] table")
+
+    scans: list[BP5NanoringConfigScan] = []
+    for scan_index, scan_table in enumerate(scan_data, start=1):
+        if not isinstance(scan_table, dict):
+            raise ValueError(f"[[scans]] entry {scan_index} must be a TOML table")
+        scan_options = _normalize_config_options(
+            scan_table,
+            context=f"[[scans]] entry {scan_index}",
+        )
+        scan_name = _config_scan_name(scan_options.pop("name", None), scan_index)
+        scan_kind = _config_scan_kind(scan_options.pop("kind", None), scan_options)
+        merged_options = {**general_options, **scan_options}
+        scan_output_dir = Path(
+            merged_options.pop("output_dir", output_dir / "scans" / scan_name)
+        )
+        series_options = _config_series_options(
+            scan_name=scan_name,
+            scan_kind=scan_kind,
+            output_dir=scan_output_dir,
+            options=merged_options,
+        )
+        scans.append(
+            BP5NanoringConfigScan(
+                name=scan_name,
+                kind=scan_kind,
+                output_dir=scan_output_dir,
+                series_options=series_options,
+            )
+        )
+    return output_dir, tuple(scans)
+
+
+def _normalize_config_options(
+    options: dict[str, object],
+    context: str,
+) -> dict[str, object]:
+    normalized: dict[str, object] = {}
+    for key, value in options.items():
+        if key not in CONFIG_ALLOWED_OPTION_KEYS:
+            raise ValueError(f"{context}: unknown config option {key!r}")
+        normalized_key = CONFIG_OPTION_ALIASES.get(key, key)
+        if normalized_key in normalized:
+            raise ValueError(
+                f"{context}: duplicate config option after aliases: {normalized_key!r}"
+            )
+        normalized[normalized_key] = _coerce_config_value(
+            normalized_key,
+            value,
+            context=context,
+        )
+    return normalized
+
+
+def _coerce_config_value(key: str, value: object, context: str) -> object:
+    if key in CONFIG_BOOL_OPTION_KEYS:
+        if not isinstance(value, bool):
+            raise ValueError(f"{context}: {key} must be true or false")
+        return value
+    if key in CONFIG_INT_OPTION_KEYS:
+        return _config_int(value, key=key, context=context)
+    if key in CONFIG_FLOAT_OPTION_KEYS:
+        return _config_float(value, key=key, context=context)
+    if key == "m_values":
+        return _config_int_tuple(value, key=key, context=context)
+    if key == "turn_motifs":
+        return _config_turn_motifs(value, context=context)
+    if key == "output_dir":
+        if not isinstance(value, str):
+            raise ValueError(f"{context}: output_dir must be a string path")
+        return Path(value)
+    return value
+
+
+def _config_int(value: object, key: str, context: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{context}: {key} must be an integer")
+    return value
+
+
+def _config_float(value: object, key: str, context: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{context}: {key} must be a number")
+    return float(value)
+
+
+def _config_int_tuple(value: object, key: str, context: str) -> tuple[int, ...]:
+    if isinstance(value, bool):
+        raise ValueError(f"{context}: {key} must be an integer or integer array")
+    if isinstance(value, int):
+        return (value,)
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{context}: {key} must be a non-empty integer array")
+    values = []
+    for entry in value:
+        if isinstance(entry, bool) or not isinstance(entry, int):
+            raise ValueError(f"{context}: {key} must contain only integers")
+        values.append(entry)
+    return tuple(values)
+
+
+def _config_turn_motifs(value: object, context: str) -> tuple[TurnMotifType, ...]:
+    cis_turn_motifs = tuple(
+        motif_type
+        for motif_type, definition in TURN_MOTIF_DEFINITIONS.items()
+        if definition.requires_cis_peptide
+    )
+    if isinstance(value, str):
+        if value == "default":
+            return DEFAULT_TURN_MOTIF_TYPES
+        if value == "cis":
+            return cis_turn_motifs
+        if value == "all":
+            return tuple(TURN_MOTIF_DEFINITIONS)
+        if value == "non_cis":
+            return tuple(
+                motif_type
+                for motif_type, definition in TURN_MOTIF_DEFINITIONS.items()
+                if not definition.requires_cis_peptide
+            )
+        value = [value]
+    if not isinstance(value, list) or not value:
+        raise ValueError(
+            f"{context}: turn_motifs must be a non-empty string or string array"
+        )
+    unknown_motifs = [
+        motif_type
+        for motif_type in value
+        if not isinstance(motif_type, str) or motif_type not in TURN_MOTIF_DEFINITIONS
+    ]
+    if unknown_motifs:
+        raise ValueError(f"{context}: unknown turn motif(s): {unknown_motifs}")
+    return tuple(value)
+
+
+def _config_scan_name(raw_name: object, scan_index: int) -> str:
+    if raw_name is None:
+        return f"scan_{scan_index}"
+    if not isinstance(raw_name, str) or not raw_name:
+        raise ValueError("[[scans]] name must be a non-empty string")
+    if any(
+        not (character.isalnum() or character in {"_", "-"})
+        for character in raw_name
+    ):
+        raise ValueError(
+            "[[scans]] name may contain only letters, numbers, underscores, and hyphens"
+        )
+    return raw_name
+
+
+def _config_scan_kind(raw_kind: object, options: dict[str, object]) -> str:
+    if raw_kind is None:
+        if "secondary_structure" in options:
+            return "secondary_structure"
+        if "turn_motifs" in options:
+            return "turn_motif"
+        return "rotamer"
+    if raw_kind in {"secondary", "secondary_structure"}:
+        return "secondary_structure"
+    if raw_kind in {"turn", "turn_motif"}:
+        return "turn_motif"
+    if raw_kind == "rotamer":
+        return "rotamer"
+    raise ValueError(
+        "scan kind must be 'secondary_structure', 'turn_motif', or 'rotamer'"
+    )
+
+
+def _config_series_options(
+    scan_name: str,
+    scan_kind: str,
+    output_dir: Path,
+    options: dict[str, object],
+) -> dict[str, object]:
+    series_options = dict(options)
+    scan_limit = series_options.pop("scan_limit", None)
+    if scan_limit is not None:
+        series_options.setdefault("rotamer_scan_limit", scan_limit)
+        if scan_kind == "secondary_structure":
+            series_options.setdefault("secondary_structure_scan_limit", scan_limit)
+        if scan_kind == "turn_motif":
+            series_options.setdefault("turn_scan_limit", scan_limit)
+
+    if series_options.pop("no_clash_cutoffs", False):
+        series_options["rotamer_clash_cutoff"] = None
+        series_options["secondary_structure_clash_cutoff"] = None
+    if "allow_secondary_structure_cylinder_intrusions" in series_options:
+        allow_intrusions = bool(
+            series_options.pop("allow_secondary_structure_cylinder_intrusions")
+        )
+        series_options["secondary_structure_cylinder_filter"] = not allow_intrusions
+
+    if scan_kind == "secondary_structure":
+        if series_options.get("secondary_structure") not in {
+            "alpha_helix",
+            "beta_strand",
+        }:
+            raise ValueError(
+                f"{scan_name}: secondary_structure scans require "
+                "secondary_structure = 'alpha_helix' or 'beta_strand'"
+            )
+        series_options["turn_motifs"] = ()
+    elif scan_kind == "turn_motif":
+        if not series_options.get("turn_motifs"):
+            raise ValueError(f"{scan_name}: turn_motif scans require turn_motifs")
+        series_options["secondary_structure"] = None
+    elif scan_kind == "rotamer":
+        series_options["secondary_structure"] = None
+        series_options["turn_motifs"] = ()
+    else:
+        raise ValueError(f"unknown scan kind {scan_kind!r}")
+
+    series_options["output_dir"] = output_dir
+    return series_options
+
+
+def _config_scan_metadata(output_dir: Path) -> dict[str, object]:
+    metadata_path = output_dir / "reports" / "run_metadata.json"
+    if not metadata_path.exists():
+        return {}
+    with metadata_path.open() as file:
+        return json.load(file)
+
+
+def _write_config_reports(
+    config_path: Path,
+    config_data: dict[str, object],
+    output_dir: Path,
+    results: tuple[BP5NanoringConfigScanResult, ...],
+) -> list[Path]:
+    if not any(result.scan.series_options.get("write_reports") for result in results):
+        return []
+
+    overwrite = any(
+        bool(result.scan.series_options.get("overwrite"))
+        for result in results
+    )
+    report_output_dir = output_dir / "reports"
+    report_output_dir.mkdir(parents=True, exist_ok=True)
+    written_paths: list[Path] = []
+
+    report_specs = (
+        (
+            "rotamer_scores.csv",
+            CONFIG_ROTAMER_REPORT_FIELDS,
+            ROTAMER_REPORT_FIELDS,
+        ),
+        (
+            "secondary_structure_scores.csv",
+            CONFIG_SECONDARY_STRUCTURE_REPORT_FIELDS,
+            SECONDARY_STRUCTURE_REPORT_FIELDS,
+        ),
+        (
+            "turn_motif_scores.csv",
+            CONFIG_TURN_MOTIF_REPORT_FIELDS,
+            TURN_MOTIF_REPORT_FIELDS,
+        ),
+    )
+    for report_name, output_fields, input_fields in report_specs:
+        rows = _config_report_rows(results, report_name, input_fields)
+        if not rows:
+            continue
+        report_path = report_output_dir / report_name
+        _write_csv_report(
+            path=report_path,
+            fieldnames=output_fields,
+            rows=rows,
+            overwrite=overwrite,
+        )
+        written_paths.append(report_path)
+
+    metadata_path = report_output_dir / "config_run_metadata.json"
+    _write_json_report(
+        path=metadata_path,
+        data={
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "config_path": str(config_path),
+            "raw_config": config_data,
+            "output_dir": str(output_dir),
+            "scans": [
+                {
+                    "name": result.scan.name,
+                    "kind": result.scan.kind,
+                    "output_dir": str(result.scan.output_dir),
+                    "resolved_options": _jsonable_config_value(
+                        result.scan.series_options
+                    ),
+                    "written_paths": [
+                        str(path)
+                        for path in result.written_paths
+                    ],
+                    "run_metadata": result.metadata,
+                }
+                for result in results
+            ],
+        },
+        overwrite=overwrite,
+    )
+    written_paths.append(metadata_path)
+    return written_paths
+
+
+def _config_report_rows(
+    results: tuple[BP5NanoringConfigScanResult, ...],
+    report_name: str,
+    fieldnames: tuple[str, ...],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for result in results:
+        report_path = result.scan.output_dir / "reports" / report_name
+        if not report_path.exists():
+            continue
+        with report_path.open(newline="") as file:
+            for row in csv.DictReader(file):
+                rows.append(
+                    {
+                        "scan_name": result.scan.name,
+                        "scan_kind": result.scan.kind,
+                        **{field: row.get(field, "") for field in fieldnames},
+                    }
+                )
+    return rows
+
+
+def _jsonable_config_value(value: object) -> object:
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, tuple):
+        return [_jsonable_config_value(entry) for entry in value]
+    if isinstance(value, list):
+        return [_jsonable_config_value(entry) for entry in value]
+    if isinstance(value, dict):
+        return {
+            str(key): _jsonable_config_value(entry)
+            for key, entry in value.items()
+        }
+    return value
 
 
 def _rotamer_report_rows(
@@ -2545,6 +3070,15 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help=(
+            "Run one or more scans from a TOML config file. Config runs use "
+            "[general] defaults plus [[scans]] overrides."
+        ),
+    )
+    parser.add_argument(
         "--m",
         type=int,
         nargs="+",
@@ -2756,6 +3290,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args(argv)
+    if args.config is not None:
+        written_paths = write_bp5_nanoring_config(
+            config_path=args.config,
+            progress=lambda message: print(message, file=sys.stderr),
+        )
+        for path in written_paths:
+            print(f"Wrote {path}")
+        return 0
 
     rotamer_clash_cutoff = (
         None if args.no_clash_cutoffs else args.rotamer_clash_cutoff

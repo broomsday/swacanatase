@@ -47,6 +47,7 @@ from .placement import (
     generate_m_equals_n_nanorings,
     place_bp5_rotamer_ensembles_around_nanoring,
     place_bp5_sidechains_around_nanoring,
+    write_bp5_nanoring_config,
     write_bp5_nanoring_series,
 )
 from .secondary_structure import (
@@ -150,6 +151,7 @@ __all__ = [
     "turn_motif_definition_with_torsion_source",
     "turn_motif_perturbation_definitions",
     "write_bp5_nanoring_series",
+    "write_bp5_nanoring_config",
     "write_armchair_nanoring",
 ]
 

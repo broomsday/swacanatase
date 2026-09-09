@@ -384,6 +384,86 @@ def test_placement_cli_exposes_rotamer_and_secondary_structure_output_modes(
     assert len(list((tmp_path / "secondary_structure").glob("*.cif"))) == 1
 
 
+def test_placement_cli_runs_configured_scan_sections(tmp_path: Path) -> None:
+    config_path = tmp_path / "scan.toml"
+    output_dir = tmp_path / "generated"
+    config_path.write_text(
+        f"""
+[general]
+m = [18]
+output_dir = "{output_dir}"
+overwrite = true
+write_reports = true
+scan_limit = 1
+max_rotamers_per_site = 1
+no_clash_cutoffs = true
+allow_secondary_structure_cylinder_intrusions = true
+
+[[scans]]
+name = "alpha"
+kind = "secondary_structure"
+secondary_structure = "alpha_helix"
+residues_before = 1
+residues_after = 0
+
+[[scans]]
+name = "beta"
+kind = "secondary_structure"
+secondary_structure = "beta_strand"
+residues_before = 0
+residues_after = 1
+
+[[scans]]
+name = "turns"
+kind = "turn_motif"
+turn_motifs = "default"
+
+[[scans]]
+name = "cis_turns"
+kind = "turn_motif"
+turn_motifs = "cis"
+include_cis_turns = true
+""".strip()
+    )
+
+    exit_code = placement_main(["--config", str(config_path)])
+
+    assert exit_code == 0
+    assert (output_dir / "scans" / "alpha" / "secondary_structure").is_dir()
+    assert (output_dir / "scans" / "beta" / "secondary_structure").is_dir()
+    assert (output_dir / "scans" / "turns" / "turn_motif").is_dir()
+    assert (output_dir / "scans" / "cis_turns" / "turn_motif").is_dir()
+
+    with (output_dir / "reports" / "secondary_structure_scores.csv").open(
+        newline=""
+    ) as file:
+        secondary_rows = list(csv.DictReader(file))
+    with (output_dir / "reports" / "turn_motif_scores.csv").open(newline="") as file:
+        turn_rows = list(csv.DictReader(file))
+    with (output_dir / "reports" / "config_run_metadata.json").open() as file:
+        metadata = json.load(file)
+
+    assert {row["scan_name"] for row in secondary_rows} == {"alpha", "beta"}
+    assert {row["secondary_structure"] for row in secondary_rows} == {
+        "alpha_helix",
+        "beta_strand",
+    }
+    assert {row["scan_name"] for row in turn_rows} == {"turns", "cis_turns"}
+    assert {"True", "False"} <= {row["turn_requires_cis_peptide"] for row in turn_rows}
+    assert [scan["name"] for scan in metadata["scans"]] == [
+        "alpha",
+        "beta",
+        "turns",
+        "cis_turns",
+    ]
+    assert metadata["scans"][2]["resolved_options"]["turn_motifs"] == [
+        "beta_turn_ad",
+        "beta_turn_ab1",
+        "beta_turn_ab2",
+        "gamma_turn_inverse",
+    ]
+
+
 def test_turn_motif_segments_reuse_clash_and_cylinder_scoring() -> None:
     placement = place_bp5_rotamer_ensembles_around_nanoring(
         m=18,
