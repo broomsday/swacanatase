@@ -121,9 +121,10 @@ By default, `CV1` and `CV2` keep the ideal catalytic geometry and are rigid-fit
 to minimize residuals against the selected adjacent scaffold carbons. Use
 `--snap-virtual-carbons` only when exact virtual-carbon overlap is desired.
 
-Rotamer and secondary-structure output modes evaluate and write complete
-symmetric states. For example, `--max-rotamers-per-site 1` writes one rotamer
-complex containing all `M/2` BP5 positions, not one file per position.
+Rotamer and motif output modes evaluate and write complete symmetric states. For
+example, `--max-rotamers-per-site 1` writes one rotamer complex containing all
+`M/2` BP5 positions, not one file per position. Direct motif scans write their
+grown alpha-helix, beta-strand, or turn complexes under `data/generated/motifs/`.
 Use `--write-reports` to persist score tables and run metadata under
 `data/generated/reports/`. Use `--scan-limit N` for early tests; it scans only
 the first `N` deterministic BP5 chi-rotamer states and grows at most the first
@@ -167,9 +168,11 @@ Report outputs:
 
 Multiple scan modes can also be run from one TOML config file. Values in
 `[general]` apply to every scan; values in each `[[scans]]` table override the
-general value for that scan. Config runs write each scan under
-`data/generated/scans/<scan-name>/` and merge report CSVs under
-`data/generated/reports/` with `scan_name` and `scan_kind` columns.
+general value for that scan. Config runs write shared pre-scan structures under
+`data/generated/nanoring/`, `data/generated/theozyme/`, and
+`data/generated/rotamers/`. Per-scan grown backbone fragments are motifs and are
+written under `data/generated/scans/<scan-name>/motifs/`. Config reports are
+merged under `data/generated/reports/` with `scan_name` and `scan_kind` columns.
 
 Example:
 
@@ -190,27 +193,25 @@ allow_secondary_structure_cylinder_intrusions = true
 
 [[scans]]
 name = "alpha_helix"
-kind = "secondary_structure"
-secondary_structure = "alpha_helix"
+kind = "alpha_helix"
 residues_before = 3
 residues_after = 3
 
 [[scans]]
 name = "beta_strand"
-kind = "secondary_structure"
-secondary_structure = "beta_strand"
+kind = "beta_strand"
 residues_before = 3
 residues_after = 3
 
 [[scans]]
 name = "default_turns"
-kind = "turn_motif"
+kind = "turns"
 turn_motifs = "default"
 turn_bp5_position = "central"
 
 [[scans]]
 name = "cis_turns"
-kind = "turn_motif"
+kind = "turns"
 turn_motifs = "cis"
 include_cis_turns = true
 turn_bp5_position = "central"
@@ -233,9 +234,10 @@ states as:
 BP5 chi-rotamer state x turn motif x BP5 motif offset
 ```
 
-Turn complexes are written under `data/generated/turn_motif/`, and reports
-reuse the same clash and nanoring-cylinder filters as regular
-secondary-structure scanning.
+Turn complexes are written under `data/generated/motifs/` in direct CLI runs or
+under `data/generated/scans/<scan-name>/motifs/` in config runs. Reports reuse
+the same clash and nanoring-cylinder filters as regular secondary-structure
+scanning.
 
 Example:
 

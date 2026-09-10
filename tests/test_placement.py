@@ -181,15 +181,12 @@ def test_write_bp5_nanoring_series_can_write_rotamer_and_secondary_structure_out
     ]
     assert all(path.exists() for path in written_paths)
     assert sum(path.parent.name == "rotamers" for path in written_paths) == 1
-    assert (
-        sum(path.parent.name == "secondary_structure" for path in written_paths)
-        == 1
-    )
+    assert sum(path.parent.name == "motifs" for path in written_paths) == 1
     assert tmp_path / "rotamers" / "nanoring_M18_gplus_m90.cif" in written_paths
     assert all(
         "_alpha_helix_pre1_post1" in path.stem
         for path in written_paths
-        if path.parent.name == "secondary_structure"
+        if path.parent.name == "motifs"
     )
 
 
@@ -253,7 +250,7 @@ def test_write_bp5_nanoring_series_can_limit_deterministic_scan_size(
 
     rotamer_paths = [path for path in written_paths if path.parent.name == "rotamers"]
     secondary_structure_paths = [
-        path for path in written_paths if path.parent.name == "secondary_structure"
+        path for path in written_paths if path.parent.name == "motifs"
     ]
     with (tmp_path / "reports" / "rotamer_scores.csv").open(newline="") as file:
         rotamer_rows = list(csv.DictReader(file))
@@ -289,7 +286,7 @@ def test_write_bp5_nanoring_series_reports_phi_psi_scan_targets(
     )
 
     secondary_structure_paths = [
-        path for path in written_paths if path.parent.name == "secondary_structure"
+        path for path in written_paths if path.parent.name == "motifs"
     ]
     with (tmp_path / "reports" / "secondary_structure_scores.csv").open(
         newline=""
@@ -328,7 +325,7 @@ def test_write_bp5_nanoring_series_defaults_to_three_residue_segment_context(
     )
 
     secondary_structure_paths = [
-        path for path in written_paths if path.parent.name == "secondary_structure"
+        path for path in written_paths if path.parent.name == "motifs"
     ]
     with (tmp_path / "reports" / "run_metadata.json").open() as file:
         metadata = json.load(file)
@@ -376,12 +373,12 @@ def test_placement_cli_exposes_rotamer_and_secondary_structure_output_modes(
 
     assert exit_code == 0
     assert (tmp_path / "rotamers").is_dir()
-    assert (tmp_path / "secondary_structure").is_dir()
+    assert (tmp_path / "motifs").is_dir()
     assert (tmp_path / "reports" / "rotamer_scores.csv").is_file()
     assert (tmp_path / "reports" / "secondary_structure_scores.csv").is_file()
     assert (tmp_path / "reports" / "run_metadata.json").is_file()
     assert len(list((tmp_path / "rotamers").glob("*.cif"))) == 1
-    assert len(list((tmp_path / "secondary_structure").glob("*.cif"))) == 1
+    assert len(list((tmp_path / "motifs").glob("*.cif"))) == 1
 
 
 def test_placement_cli_runs_configured_scan_sections(tmp_path: Path) -> None:
@@ -401,26 +398,24 @@ allow_secondary_structure_cylinder_intrusions = true
 
 [[scans]]
 name = "alpha"
-kind = "secondary_structure"
-secondary_structure = "alpha_helix"
+kind = "alpha_helix"
 residues_before = 1
 residues_after = 0
 
 [[scans]]
 name = "beta"
-kind = "secondary_structure"
-secondary_structure = "beta_strand"
+kind = "beta_strand"
 residues_before = 0
 residues_after = 1
 
 [[scans]]
 name = "turns"
-kind = "turn_motif"
+kind = "turns"
 turn_motifs = "default"
 
 [[scans]]
 name = "cis_turns"
-kind = "turn_motif"
+kind = "turns"
 turn_motifs = "cis"
 include_cis_turns = true
 """.strip()
@@ -429,10 +424,16 @@ include_cis_turns = true
     exit_code = placement_main(["--config", str(config_path)])
 
     assert exit_code == 0
-    assert (output_dir / "scans" / "alpha" / "secondary_structure").is_dir()
-    assert (output_dir / "scans" / "beta" / "secondary_structure").is_dir()
-    assert (output_dir / "scans" / "turns" / "turn_motif").is_dir()
-    assert (output_dir / "scans" / "cis_turns" / "turn_motif").is_dir()
+    assert (output_dir / "nanoring").is_dir()
+    assert (output_dir / "theozyme").is_dir()
+    assert (output_dir / "rotamers").is_dir()
+    assert (output_dir / "scans" / "alpha" / "motifs").is_dir()
+    assert (output_dir / "scans" / "beta" / "motifs").is_dir()
+    assert (output_dir / "scans" / "turns" / "motifs").is_dir()
+    assert (output_dir / "scans" / "cis_turns" / "motifs").is_dir()
+    assert not (output_dir / "scans" / "alpha" / "nanoring").exists()
+    assert not (output_dir / "scans" / "turns" / "theozyme").exists()
+    assert not (output_dir / "scans" / "turns" / "rotamers").exists()
 
     with (output_dir / "reports" / "secondary_structure_scores.csv").open(
         newline=""
@@ -511,9 +512,11 @@ def test_turn_motif_cli_writes_outputs_and_report(tmp_path: Path) -> None:
     )
 
     assert exit_code == 0
-    assert (tmp_path / "turn_motif").is_dir()
+    assert (tmp_path / "rotamers").is_dir()
+    assert (tmp_path / "motifs").is_dir()
     assert (tmp_path / "reports" / "turn_motif_scores.csv").is_file()
-    assert len(list((tmp_path / "turn_motif").glob("*.cif"))) == 1
+    assert len(list((tmp_path / "rotamers").glob("*.cif"))) == 1
+    assert len(list((tmp_path / "motifs").glob("*.cif"))) == 1
     with (tmp_path / "reports" / "turn_motif_scores.csv").open(newline="") as file:
         rows = list(csv.DictReader(file))
     with (tmp_path / "reports" / "run_metadata.json").open() as file:

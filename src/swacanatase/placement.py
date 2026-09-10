@@ -55,10 +55,9 @@ DEFAULT_GENERATED_DATA_DIR = Path("data/generated")
 DEFAULT_NANORING_OUTPUT_DIR = DEFAULT_GENERATED_DATA_DIR / "nanoring"
 DEFAULT_THEOZYME_OUTPUT_DIR = DEFAULT_GENERATED_DATA_DIR / "theozyme"
 DEFAULT_ROTAMER_OUTPUT_DIR = DEFAULT_GENERATED_DATA_DIR / "rotamers"
-DEFAULT_SECONDARY_STRUCTURE_OUTPUT_DIR = (
-    DEFAULT_GENERATED_DATA_DIR / "secondary_structure"
-)
-DEFAULT_TURN_MOTIF_OUTPUT_DIR = DEFAULT_GENERATED_DATA_DIR / "turn_motif"
+DEFAULT_MOTIF_OUTPUT_DIR = DEFAULT_GENERATED_DATA_DIR / "motifs"
+DEFAULT_SECONDARY_STRUCTURE_OUTPUT_DIR = DEFAULT_MOTIF_OUTPUT_DIR
+DEFAULT_TURN_MOTIF_OUTPUT_DIR = DEFAULT_MOTIF_OUTPUT_DIR
 DEFAULT_REPORT_OUTPUT_DIR = DEFAULT_GENERATED_DATA_DIR / "reports"
 DEFAULT_SECONDARY_STRUCTURE_RESIDUES_BEFORE = 3
 DEFAULT_SECONDARY_STRUCTURE_RESIDUES_AFTER = 3
@@ -928,6 +927,9 @@ def write_bp5_nanoring_series(
     turn_motif_torsion_source: TurnMotifTorsionSource = "mode",
     turn_motif_perturbation_step_degrees: float | None = None,
     turn_motif_perturbation_radius_degrees: float = 0.0,
+    write_nanoring_outputs: bool = True,
+    write_theozyme_outputs: bool = True,
+    write_rotamer_outputs: bool | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> list[Path]:
     """Write nanoring-only and BP5-placed structures for each requested M value."""
@@ -965,20 +967,26 @@ def write_bp5_nanoring_series(
 
     m_values = tuple(m_values)
     output_dir = Path(output_dir)
+    write_rotamer_outputs = (
+        enumerate_bp5_rotamers
+        or secondary_structure is not None
+        or bool(turn_motif_definitions)
+        if write_rotamer_outputs is None
+        else write_rotamer_outputs
+    )
     nanoring_output_dir = output_dir / "nanoring"
     theozyme_output_dir = output_dir / "theozyme"
     rotamer_output_dir = output_dir / "rotamers"
-    secondary_structure_output_dir = output_dir / "secondary_structure"
-    turn_motif_output_dir = output_dir / "turn_motif"
+    motif_output_dir = output_dir / "motifs"
     report_output_dir = output_dir / "reports"
-    nanoring_output_dir.mkdir(parents=True, exist_ok=True)
-    theozyme_output_dir.mkdir(parents=True, exist_ok=True)
-    if enumerate_bp5_rotamers:
+    if write_nanoring_outputs:
+        nanoring_output_dir.mkdir(parents=True, exist_ok=True)
+    if write_theozyme_outputs:
+        theozyme_output_dir.mkdir(parents=True, exist_ok=True)
+    if write_rotamer_outputs:
         rotamer_output_dir.mkdir(parents=True, exist_ok=True)
-    if secondary_structure is not None:
-        secondary_structure_output_dir.mkdir(parents=True, exist_ok=True)
-    if turn_motif_definitions:
-        turn_motif_output_dir.mkdir(parents=True, exist_ok=True)
+    if secondary_structure is not None or turn_motif_definitions:
+        motif_output_dir.mkdir(parents=True, exist_ok=True)
     if write_reports:
         report_output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -998,28 +1006,39 @@ def write_bp5_nanoring_series(
             anchor_phase_offset=anchor_phase_offset,
             snap_virtual_carbons=snap_virtual_carbons,
         )
-        ring_path = nanoring_output_dir / f"nanoring_M{m}.{file_format}"
-        complex_path = theozyme_output_dir / f"nanoring_M{m}_bp5.{file_format}"
-        written_paths.append(
-            write_structure(
-                atom_array=placement.nanoring,
-                output_path=ring_path,
-                file_format=file_format,
-                overwrite=overwrite,
+        if write_nanoring_outputs:
+            ring_path = nanoring_output_dir / f"nanoring_M{m}.{file_format}"
+            written_paths.append(
+                write_structure(
+                    atom_array=placement.nanoring,
+                    output_path=ring_path,
+                    file_format=file_format,
+                    overwrite=overwrite,
+                )
             )
-        )
-        written_paths.append(
-            write_structure(
-                atom_array=placement.complex,
-                output_path=complex_path,
-                file_format=file_format,
-                overwrite=overwrite,
+        if write_theozyme_outputs:
+            complex_path = theozyme_output_dir / f"nanoring_M{m}_bp5.{file_format}"
+            written_paths.append(
+                write_structure(
+                    atom_array=placement.complex,
+                    output_path=complex_path,
+                    file_format=file_format,
+                    overwrite=overwrite,
+                )
             )
-        )
-        _emit_progress(
-            progress,
-            f"[{m_index}/{len(m_values)}] M={m}: wrote scaffold and rigid complex",
-        )
+        if write_nanoring_outputs or write_theozyme_outputs:
+            _emit_progress(
+                progress,
+                (
+                    f"[{m_index}/{len(m_values)}] M={m}: wrote scaffold "
+                    "and rigid complex"
+                ),
+            )
+        else:
+            _emit_progress(
+                progress,
+                f"[{m_index}/{len(m_values)}] M={m}: prepared scaffold and rigid complex",
+            )
 
         if (
             not enumerate_bp5_rotamers
@@ -1119,7 +1138,7 @@ def write_bp5_nanoring_series(
                 ),
             )
         rotamer_output_paths: dict[str, Path] = {}
-        if enumerate_bp5_rotamers:
+        if write_rotamer_outputs:
             for state in rotamer_placement.accepted_rotamer_states:
                 rotamer_path = (
                     rotamer_output_dir
@@ -1141,7 +1160,7 @@ def write_bp5_nanoring_series(
         for state in rotamer_placement.accepted_secondary_structure_states:
             state_key = _secondary_state_key(state)
             segment_path = (
-                secondary_structure_output_dir
+                motif_output_dir
                 / _secondary_structure_output_filename(
                     m=m,
                     state=state,
@@ -1166,7 +1185,7 @@ def write_bp5_nanoring_series(
         for state in rotamer_placement.accepted_turn_motif_states:
             state_key = _turn_motif_state_key(state)
             turn_motif_path = (
-                turn_motif_output_dir
+                motif_output_dir
                 / _turn_motif_output_filename(
                     m=m,
                     state=state,
@@ -1371,9 +1390,22 @@ def write_bp5_nanoring_config(
     with config_path.open("rb") as file:
         config_data = tomllib.load(file)
 
-    output_dir, scans = _bp5_nanoring_config_scans(config_data)
+    output_dir, pre_scan_options, scans = _bp5_nanoring_config_scans(config_data)
     results: list[BP5NanoringConfigScanResult] = []
     written_paths: list[Path] = []
+    _emit_progress(
+        progress,
+        "[config] writing shared nanoring, theozyme, and rotamer outputs",
+    )
+    pre_scan_written_paths = write_bp5_nanoring_series(
+        **pre_scan_options,
+        progress=(
+            None
+            if progress is None
+            else lambda message: progress(f"[pre_scan] {message}")
+        ),
+    )
+    written_paths.extend(pre_scan_written_paths)
     for scan_index, scan in enumerate(scans, start=1):
         _emit_progress(
             progress,
@@ -1405,6 +1437,8 @@ def write_bp5_nanoring_config(
         config_path=config_path,
         config_data=config_data,
         output_dir=output_dir,
+        pre_scan_options=pre_scan_options,
+        pre_scan_written_paths=tuple(pre_scan_written_paths),
         results=tuple(results),
     )
     written_paths.extend(report_paths)
@@ -1413,7 +1447,7 @@ def write_bp5_nanoring_config(
 
 def _bp5_nanoring_config_scans(
     config_data: dict[str, object],
-) -> tuple[Path, tuple[BP5NanoringConfigScan, ...]]:
+) -> tuple[Path, dict[str, object], tuple[BP5NanoringConfigScan, ...]]:
     unknown_top_level_keys = sorted(set(config_data) - CONFIG_TOP_LEVEL_KEYS)
     if unknown_top_level_keys:
         raise ValueError(f"unknown top-level config key(s): {unknown_top_level_keys}")
@@ -1434,6 +1468,17 @@ def _bp5_nanoring_config_scans(
         raise ValueError("config must define at least one [[scans]] table")
 
     scans: list[BP5NanoringConfigScan] = []
+    pre_scan_options = _config_series_options(
+        scan_name="pre_scan",
+        scan_kind="rotamer",
+        output_dir=output_dir,
+        options=general_options,
+    )
+    pre_scan_options["enumerate_bp5_rotamers"] = True
+    pre_scan_options["write_reports"] = False
+    pre_scan_options["write_nanoring_outputs"] = True
+    pre_scan_options["write_theozyme_outputs"] = True
+    pre_scan_options["write_rotamer_outputs"] = True
     for scan_index, scan_table in enumerate(scan_data, start=1):
         if not isinstance(scan_table, dict):
             raise ValueError(f"[[scans]] entry {scan_index} must be a TOML table")
@@ -1453,6 +1498,9 @@ def _bp5_nanoring_config_scans(
             output_dir=scan_output_dir,
             options=merged_options,
         )
+        series_options["write_nanoring_outputs"] = False
+        series_options["write_theozyme_outputs"] = False
+        series_options["write_rotamer_outputs"] = False
         scans.append(
             BP5NanoringConfigScan(
                 name=scan_name,
@@ -1461,7 +1509,7 @@ def _bp5_nanoring_config_scans(
                 series_options=series_options,
             )
         )
-    return output_dir, tuple(scans)
+    return output_dir, pre_scan_options, tuple(scans)
 
 
 def _normalize_config_options(
@@ -1586,16 +1634,19 @@ def _config_scan_kind(raw_kind: object, options: dict[str, object]) -> str:
         if "secondary_structure" in options:
             return "secondary_structure"
         if "turn_motifs" in options:
-            return "turn_motif"
+            return "turns"
         return "rotamer"
+    if raw_kind in {"alpha_helix", "beta_strand"}:
+        return raw_kind
     if raw_kind in {"secondary", "secondary_structure"}:
         return "secondary_structure"
-    if raw_kind in {"turn", "turn_motif"}:
-        return "turn_motif"
+    if raw_kind in {"turn", "turns", "turn_motif", "turn_motifs"}:
+        return "turns"
     if raw_kind == "rotamer":
         return "rotamer"
     raise ValueError(
-        "scan kind must be 'secondary_structure', 'turn_motif', or 'rotamer'"
+        "scan kind must be 'alpha_helix', 'beta_strand', 'turns', "
+        "'secondary_structure', 'turn_motif', or 'rotamer'"
     )
 
 
@@ -1609,9 +1660,9 @@ def _config_series_options(
     scan_limit = series_options.pop("scan_limit", None)
     if scan_limit is not None:
         series_options.setdefault("rotamer_scan_limit", scan_limit)
-        if scan_kind == "secondary_structure":
+        if scan_kind in {"secondary_structure", "alpha_helix", "beta_strand"}:
             series_options.setdefault("secondary_structure_scan_limit", scan_limit)
-        if scan_kind == "turn_motif":
+        if scan_kind == "turns":
             series_options.setdefault("turn_scan_limit", scan_limit)
 
     if series_options.pop("no_clash_cutoffs", False):
@@ -1623,7 +1674,18 @@ def _config_series_options(
         )
         series_options["secondary_structure_cylinder_filter"] = not allow_intrusions
 
-    if scan_kind == "secondary_structure":
+    if scan_kind in {"alpha_helix", "beta_strand"}:
+        secondary_structure = series_options.setdefault(
+            "secondary_structure",
+            scan_kind,
+        )
+        if secondary_structure != scan_kind:
+            raise ValueError(
+                f"{scan_name}: {scan_kind} scans cannot override "
+                f"secondary_structure = {secondary_structure!r}"
+            )
+        series_options["turn_motifs"] = ()
+    elif scan_kind == "secondary_structure":
         if series_options.get("secondary_structure") not in {
             "alpha_helix",
             "beta_strand",
@@ -1633,9 +1695,9 @@ def _config_series_options(
                 "secondary_structure = 'alpha_helix' or 'beta_strand'"
             )
         series_options["turn_motifs"] = ()
-    elif scan_kind == "turn_motif":
+    elif scan_kind == "turns":
         if not series_options.get("turn_motifs"):
-            raise ValueError(f"{scan_name}: turn_motif scans require turn_motifs")
+            raise ValueError(f"{scan_name}: turns scans require turn_motifs")
         series_options["secondary_structure"] = None
     elif scan_kind == "rotamer":
         series_options["secondary_structure"] = None
@@ -1659,6 +1721,8 @@ def _write_config_reports(
     config_path: Path,
     config_data: dict[str, object],
     output_dir: Path,
+    pre_scan_options: dict[str, object],
+    pre_scan_written_paths: tuple[Path, ...],
     results: tuple[BP5NanoringConfigScanResult, ...],
 ) -> list[Path]:
     if not any(result.scan.series_options.get("write_reports") for result in results):
@@ -1710,6 +1774,14 @@ def _write_config_reports(
             "config_path": str(config_path),
             "raw_config": config_data,
             "output_dir": str(output_dir),
+            "pre_scan": {
+                "output_dir": str(output_dir),
+                "resolved_options": _jsonable_config_value(pre_scan_options),
+                "written_paths": [
+                    str(path)
+                    for path in pre_scan_written_paths
+                ],
+            },
             "scans": [
                 {
                     "name": result.scan.name,
@@ -3105,7 +3177,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--enumerate-bp5-rotamers",
         action="store_true",
-        help="Also write accepted BP5 chi-rotamer complexes under rotamers/.",
+        help=(
+            "Write accepted BP5 chi-rotamer complexes under rotamers/. "
+            "Motif scans write these pre-scan outputs by default."
+        ),
     )
     parser.add_argument(
         "--write-reports",
@@ -3176,8 +3251,7 @@ def main(argv: list[str] | None = None) -> int:
         choices=["none", "alpha_helix", "beta_strand"],
         default="none",
         help=(
-            "Also write regular secondary-structure segment complexes under "
-            "secondary_structure/."
+            "Also write regular backbone motif complexes under motifs/."
         ),
     )
     parser.add_argument(
@@ -3204,7 +3278,7 @@ def main(argv: list[str] | None = None) -> int:
         nargs="+",
         default=None,
         help=(
-            "Also write turn-motif segment complexes under turn_motif/. "
+            "Also write turn motif complexes under motifs/. "
             "If omitted, no turn motifs are scanned."
         ),
     )
