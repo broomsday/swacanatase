@@ -14,7 +14,19 @@ designs from one selected motif state. The longer-term target is a scalable
 sweep over accepted rotamer and turn-motif states with deterministic reporting,
 filtering, and downstream sequence-design handoff.
 
-## Current Status (updated 2026-09-12)
+## Current Status (superseded for C9 production work, 2026-10-05)
+
+The C9 symmetry spike is complete: RFdiffusion2 does not support symmetry in
+its public inference workflow. ProteinGenerator was also evaluated and supplies
+only sequence symmetry, not rigid coordinate symmetry. Do not implement the
+C9 production exporter proposed below without a new coordinate-symmetric
+generator or a validated downstream rigid-Cn projection. See
+[`symmetric_backbone_generator_spike.md`](symmetric_backbone_generator_spike.md).
+
+The single-ASU RFdiffusion2 observations below remain useful only for an
+asymmetric control or future non-C9 work.
+
+## Historical single-ASU status (updated 2026-09-12)
 
 A hands-on validation spike has been completed against a sibling RFdiffusion2
 checkout (`/home/broom/AlphaCarbon/RFdiffusion2`). The plan below is largely

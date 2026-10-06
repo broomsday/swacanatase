@@ -50,6 +50,38 @@ swacanatase-derived motif+ligand input and generated a ~100-residue scaffold in
 The spike input builder lives at `scripts/spike_export_rfd2_input.py` (throwaway;
 informs the real `src/swacanatase/rfdiffusion.py`).
 
+## C9 symmetry spike (2026-10-04): RFdiffusion2 does not support symmetry
+
+The validated M18 single-ASU input was run with `config/inference/sym.yaml`,
+`sym.symid=C9`, `sym.max_nsub=9`, and the same `BP5,PD,CNT` ligand contract.
+The diffusion job completed, but its PDB contains only the 101-residue ASU and
+one copy of each ligand fragment. It is therefore a useful asymmetric control,
+not a C9 result. The stock `rf_diffusion/run_inference.py` parses `sym.yaml` but
+does not call `ipd.sym.create_sym_manager(conf)`, so no symmetry manager is
+installed.
+
+A spike-only launcher was then used to create the RFdiffusion symmetry manager
+before calling the stock sampler. That reached the intended symmetry path, but
+failed before the first denoising step in
+`rf_diffusion/sym/sym_indep.py`: it calls `SymIndex.set_kind()`, which does not
+exist on the `SymIndex` implementation bundled in this checkout. This is an
+upstream RFdiffusion2/IPD API incompatibility, not an export or ligand-parsing
+failure.
+
+This behavior is confirmed upstream, not merely a local checkout problem. The
+checkout is at its then-current `origin/main` (`d365cbf`, 2026-04-03), and an
+RFdiffusion2 maintainer closed [issue #34](https://github.com/RosettaCommons/RFdiffusion2/issues/34)
+with: “RFdiffusion2, unfortunately, does not support symmetry.” The dormant
+symmetry configuration and partial implementation are therefore not a supported
+inference interface.
+
+Do not treat `data/generated/rfdiffusion/c9_spike/out/` as a symmetric design,
+and do not build the production exporter around RFdiffusion2 C9 inference.
+ProteinGenerator's protein-only `--symmetry` / `--predict_symmetric` workflow
+was subsequently tested and is sequence-symmetric but not rigidly coordinate-
+symmetric. See [the symmetric-backbone-generator spike](docs/symmetric_backbone_generator_spike.md)
+for the complete cross-generator conclusion.
+
 ## Scrub the virtual carbons (`CV1`, `CV2`) after the motif is built
 
 `CV1` and `CV2` are **theozyme construction scaffolding, not real atoms**. They

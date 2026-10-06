@@ -25,6 +25,10 @@ Implemented pieces include:
 - Turn-anchored beta-turn and gamma-turn motif growth around placed BP5 rotamers,
   including BetaTurnLib18 mode/medoid torsions, deterministic perturbation
   scans, opt-in cis-turn classes, and turn-specific scoring/reports.
+- Export of BP5 backbone frames for a ProteinGenerator C9 exploratory spike.
+  The validated generator findings, including why neither RFdiffusion2 nor the
+  current ProteinGenerator code enforces the required rigid C9 coordinates, are
+  documented in [the symmetric-backbone-generator spike](docs/symmetric_backbone_generator_spike.md).
 
 ## Setup
 
