@@ -13,6 +13,18 @@ carbon nanohoop/nanotube scaffolds.
 - The sibling project `../tuber` generates finite carbon nanotube structures
   from chiral indices `(n,m)` and writes PDB/CIF through Biotite.
 - This project depends on `tuber` through `uv` as an editable local path source.
+- RFdiffusion3 is the symmetric-backbone production route and is cloned as the
+  sibling checkout `../foundry` (RosettaCommons `foundry` monorepo; RFD3 is at
+  `foundry/models/rfd3`). Its venv is `../foundry/.venv` on CPython 3.12 and it
+  needs `torch==2.14.1+cu126` plus `inference_mode=legacy` to run on this
+  machine's Pascal GPU, which handles C9 assemblies up to nine 90-residue
+  subunits but not the production M18 size. In symmetry mode `length` is per
+  subunit, not per assembly. Local
+  branch `local/atomworks-3.0.4-compat` carries a required compatibility patch
+  against public AtomWorks. See
+  [the symmetric-backbone-generator spike](docs/symmetric_backbone_generator_spike.md).
+- `../RFdiffusion2` remains the asymmetric single-ASU control; it does not
+  support symmetry.
 - RCSB BP5 ligand data is stored locally under `data/rcsb/`, but `data/` is
   gitignored. Hydrate it with `uv run swacanatase-download-bp5 --overwrite` or
   restore it from private backup before running tests.

@@ -1,8 +1,14 @@
 # RFdiffusion Export Notes
 
 Decisions that affect how motif/active-site structures are prepared before they
-are handed to RFdiffusion2. See `docs/rfdiffusion_motif_scaffolding_plan.md` for
-the full pipeline plan.
+are handed to an RFdiffusion-family generator. See
+`docs/rfdiffusion_motif_scaffolding_plan.md` for the full pipeline plan.
+
+The C9 production target is now **RFdiffusion3**, not RFdiffusion2; see
+[RFdiffusion3 is the C9 route](#rfdiffusion3-is-the-c9-route-2026-11-06) below
+and [the symmetric-backbone-generator spike](docs/symmetric_backbone_generator_spike.md).
+The RFdiffusion2 findings in this file remain valid for the asymmetric
+single-ASU control and still describe how the motif itself must be prepared.
 
 ## Validated runtime findings (single-ASU spike, M18)
 
@@ -82,6 +88,49 @@ was subsequently tested and is sequence-symmetric but not rigidly coordinate-
 symmetric. See [the symmetric-backbone-generator spike](docs/symmetric_backbone_generator_spike.md)
 for the complete cross-generator conclusion.
 
+## RFdiffusion3 is the C9 route (2026-11-06)
+
+RFdiffusion3 supports coordinate-level Cn symmetry *and* all-atom ligand/metal
+conditioning, which is the combination this project needs and the combination
+RFdiffusion2 lacks. It is cloned as a sibling checkout at
+`/home/broom/AlphaCarbon/foundry` (RFD3 lives at `foundry/models/rfd3`).
+
+**It does give us what we want, and it is verified.** A C9 unconditional job of
+nine 90-residue subunits ran on the workstation GTX 1080 Ti in 388 seconds and
+is symmetric to 0.04 Angstrom per-subunit CA RMSD about the Z axis through the
+origin. Nine 180-residue subunits exhaust the card, and the production M18
+target sits just above the validated size, so plan production sweeps on a
+40-80 GB class card. Note that `length` in symmetry mode is **per subunit**, not
+per assembly. Full installation pins, hardware measurements, and the local
+upstream-compatibility patch are recorded in
+[the symmetric-backbone-generator spike](docs/symmetric_backbone_generator_spike.md).
+
+What changes for the exporter, relative to the RFdiffusion2 contract below:
+
+1. **The nanoring is passed once, not nine times.** `is_unsym_motif` names
+   motifs and ligands that the symmetry operator must not replicate. The nine
+   BP5/Pd motifs are symmetrized; the nanoring is the shared on-axis ligand.
+2. **The motif must be pre-symmetrized and centered on the origin.** RFD3 only
+   supports `is_symmetric_motif: true` and rejects asymmetric motif inputs.
+   There is no `ORI` token to emit; centering is on the origin by convention.
+3. **Ligand chemistry is resolved through AtomWorks and the CCD, not
+   OpenBabel.** A ligand whose residue name matches a CCD code is matched to the
+   CCD; the documented escape hatch for anything else is a residue name that is
+   invalid for the CCD (for example `C:T`), which makes AtomWorks use the input
+   geometry verbatim. The carbon nanoring needs that escape hatch. This replaces
+   the RFdiffusion2 OpenBabel bond-perception problem with a different one, so
+   the loaded bond graph still has to be verified explicitly.
+4. **Atom-level fixing is explicit.** `select_fixed_atoms` pins named atoms per
+   residue (for example the BP5 donor nitrogens and `PD`) rather than relying on
+   whole-residue motif semantics.
+5. **The last sampling steps are not symmetrized.** `sym_step_frac` defaults to
+   `0.9`. Either set it to `1.0` or keep a downstream rigid Cn projection plus
+   complete geometry validation.
+
+Unchanged from the RFdiffusion2 work: scrub `CV1`/`CV2` before export, keep
+their coordinates in the manifest only, and compute motif RMSD on the `N/CA/C`
+frame rather than naive all-backbone-including-`O`.
+
 ## Scrub the virtual carbons (`CV1`, `CV2`) after the motif is built
 
 `CV1` and `CV2` are **theozyme construction scaffolding, not real atoms**. They
@@ -129,3 +178,9 @@ Note: the full ring (M = 18–36) is likely out-of-distribution for RFdiffusion2
 small-molecule ligand handling. This is an accepted risk for the first
 experiments; explicit connectivity at least ensures the ring is represented with
 the geometry we intend.
+
+Under RFdiffusion3 this guidance still holds but for a different reason: bonds
+come from AtomWorks rather than OpenBabel, and a non-CCD residue name makes
+AtomWorks take the input geometry verbatim, so explicit connectivity in the
+input is what determines the ring's bond graph. Verify the loaded graph either
+way.

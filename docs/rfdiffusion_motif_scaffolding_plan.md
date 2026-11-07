@@ -14,17 +14,30 @@ designs from one selected motif state. The longer-term target is a scalable
 sweep over accepted rotamer and turn-motif states with deterministic reporting,
 filtering, and downstream sequence-design handoff.
 
-## Current Status (superseded for C9 production work, 2026-10-05)
+## Current Status (retargeted to RFdiffusion3, 2026-11-06)
 
-The C9 symmetry spike is complete: RFdiffusion2 does not support symmetry in
-its public inference workflow. ProteinGenerator was also evaluated and supplies
-only sequence symmetry, not rigid coordinate symmetry. Do not implement the
-C9 production exporter proposed below without a new coordinate-symmetric
-generator or a validated downstream rigid-Cn projection. See
+The C9 generator question is settled. RFdiffusion2 does not support symmetry in
+its public inference workflow, and ProteinGenerator supplies only sequence
+symmetry rather than rigid coordinate symmetry. **RFdiffusion3 supplies what
+this project needs**: coordinate-level Cn symmetrization during sampling,
+all-atom ligand and metal conditioning, and an `is_unsym_motif` flag for a
+single shared on-axis ligand such as the carbon nanoring. It is installed as a
+sibling checkout at `/home/broom/AlphaCarbon/foundry`.
+
+This is verified, not inferred: a C9 assembly of nine 90-residue subunits was
+generated on the workstation GTX 1080 Ti in 388 seconds and is symmetric to
+0.04 Angstrom per-subunit CA RMSD about the Z axis through the origin.
+
+The constraint is now hardware, not method. Nine 180-residue subunits exhaust
+the card, and the production M18 target sits just above the validated size, so
+build and validate the RFD3 input contract locally and plan production sweeps on
+a 40-80 GB class accelerator. Measurements, installation pins, and the local
+upstream-compatibility patch are in
 [`symmetric_backbone_generator_spike.md`](symmetric_backbone_generator_spike.md).
 
-The single-ASU RFdiffusion2 observations below remain useful only for an
-asymmetric control or future non-C9 work.
+Do not implement the RFdiffusion2 C9 production exporter proposed below. The
+single-ASU RFdiffusion2 observations remain useful for an asymmetric control,
+for non-C9 work, and for how the motif itself must be prepared.
 
 ## Historical single-ASU status (updated 2026-09-12)
 
