@@ -131,6 +131,104 @@ Unchanged from the RFdiffusion2 work: scrub `CV1`/`CV2` before export, keep
 their coordinates in the manifest only, and compute motif RMSD on the `N/CA/C`
 frame rather than naive all-backbone-including-`O`.
 
+## Validated C9 turn-motif scaffolding run (2026-11-07)
+
+An accepted M18 turn-motif state was scaffolded end-to-end with RFD3 symmetry
+mode on the workstation GTX 1080 Ti. This is the first C9 result for this
+project that preserves the theozyme.
+
+State: `nanoring_M18_gplus_m90_beta_turn_ad_bp5pos2` (a default turn motif,
+trans, BP5 at motif position 2, zero clash and zero ring-slab intrusion in the
+`full_clash_0_0_m12_20` scan). Contig `30,A1-4,30`, so 64 residues per subunit
+and 576 in the assembly, plus nine Pd and the 108-atom ring. Completed in 891
+seconds.
+
+The input builder is `scripts/spike_export_rfd3_input.py` (throwaway; informs
+the real `src/swacanatase/rfdiffusion.py`). Outputs are preserved under
+`data/generated/rfdiffusion3/c9_turn_motif_spike/`.
+
+### Results
+
+| Quantity | Value |
+| --- | --- |
+| Motif `N/CA/C` frame RMSD, all nine sites | 0.0246-0.0585 Angstrom |
+| BP5 donor `N1`/`N2` deviation | 0.018-0.049 Angstrom |
+| Pd-N distances, input -> output | 2.018 -> 1.983 +/- 0.022 and 2.026 +/- 0.016 Angstrom |
+| Nanoring internal rigidity | 0.0199 Angstrom, with a 1.61 Angstrom rigid-body centering shift |
+| Per-subunit CA RMSD across the nine chains | 0.032-0.042 Angstrom |
+| Protein atoms in the ring slab | 0 |
+
+RFD3 co-designs sequence with structure in the same pass, so the output chains
+carry real residue identities rather than poly-glycine. That removes the
+separate inverse-folding step the RFdiffusion2 plan assumed, though
+LigandMPNN/RF3 remain available in the same `foundry` checkout for redesign and
+refolding.
+
+### Input contract: five rules the exporter must honor
+
+1. **Nine polypeptide subunit chains.** `rfd3/inference/symmetry/frames.py`
+   derives symmetry frames from atoms with `chain_type == 6`. A lone BP5 residue
+   per chain is not a polymer, so the frame search finds no entities and fails
+   with `ValueError: min() iterable argument is empty`. A real turn motif, four
+   peptide-linked residues per chain, satisfies this. This is why turn-motif
+   states, not bare BP5/Pd sites, are the correct starting point.
+2. **BP5 is written as `ATOM`, not `HETATM`.** Its CCD type is
+   `L-PEPTIDE LINKING`. As a heteroatom, AtomWorks splits it out of the chain,
+   the remaining `GLY` residues become non-contiguous, and its own chain-info
+   consistency check fails with a residue-name multiset mismatch.
+3. **The nanoring needs a non-CCD residue name.** `C:T` is invalid as a CCD
+   code, so AtomWorks keeps our geometry verbatim ("Residue 'C:T' is not in the
+   CCD, keeping current atom order"). Name it in `symmetry.is_unsym_motif` and
+   it stays a single shared molecule on the axis; the output contained exactly
+   one 108-atom copy.
+4. **Ring carbons need unique atom names.** `tuber` names every nanoring carbon
+   `C`. Duplicate atom names inside one residue break both CONECT mapping and
+   AtomWorks, so renumber them `C1..CN`.
+5. **Pd rides on the subunit chain as its own residue.** AtomWorks moves it to a
+   separate chain during parsing and RFD3 logs
+   `Component 'PD' maps to multiple residues. If you are using Symmetry this is
+   OK.` Both are expected.
+
+### Output chain labels are a permutation of input chain labels
+
+The symmetry operator does not preserve chain naming. In the validated run the
+mapping was reflected: output `A->A`, `B->I`, `C->H`, `D->G`, `E->F`, `F->E`,
+`G->D`, `H->C`, `I->B`. A geometry filter that compares output chain `X` to
+input chain `X` reports 11-33 Angstrom errors on eight of the nine sites. Match
+each output chain to its best input chain over all nine before scoring.
+
+### `MIN_ATOMS_ALIGN` excludes small motifs on a stock checkout
+
+`rfd3/inference/symmetry/checks.py` requires at least 30 atoms in the reference
+entity to derive frames. A 4-residue beta turn ASU is 29 heavy atoms (three
+`GLY` backbones at 4 each, plus BP5's 17), and a 3-residue gamma turn is 25.
+**Both fall below the stock threshold.** Our `foundry` checkout lowers it to 12
+on branch `local/atomworks-3.0.4-compat` (commit `c179d91`), which is safe here
+because the nine subunit copies are exactly symmetric by construction, so the
+rigid frame is heavily over-determined. On an unpatched checkout, only the
+7-residue `alpha_helix`/`beta_strand` scan states are large enough.
+
+### Ring-slab intrusion scoring is insufficient for scaffolded designs
+
+`NanoringCylinderIntrusionScore` tests the ring's own thin z-slab, which the
+validated design passes with zero atoms, and genuinely so near the active site:
+the pore is clear through +/-5 Angstrom. Further along the axis it is not.
+
+```text
+pore radius 8.136 A:  ring slab 0 | +/-5 A 0 | +/-10 A 18 | unbounded 105 atoms
+closest designed atom to the axis: LEU16 CD2, radius 5.89 A, 23.8 A above the ring plane
+```
+
+The protein caps the tube roughly 20-25 Angstrom out from the active site. For a
+tube enzyme that must admit substrate or thread a growing nanoring along the
+axis, that is a design-acceptability question, so extend the intrusion metric
+along the axis (a tall cylinder, or unbounded) when filtering scaffolded
+designs. The slab form passes trivially once the motif itself is clash-free.
+
+Note also that the tightest protein-ring contacts, 2.93-2.95 Angstrom, are the
+BP5 donor nitrogens themselves and are catalytic by design. No designed residue
+comes closer, so a naive minimum-distance clash filter must exempt the motif.
+
 ## Scrub the virtual carbons (`CV1`, `CV2`) after the motif is built
 
 `CV1` and `CV2` are **theozyme construction scaffolding, not real atoms**. They

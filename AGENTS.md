@@ -20,8 +20,9 @@ carbon nanohoop/nanotube scaffolds.
   machine's Pascal GPU, which handles C9 assemblies up to nine 90-residue
   subunits but not the production M18 size. In symmetry mode `length` is per
   subunit, not per assembly. Local
-  branch `local/atomworks-3.0.4-compat` carries a required compatibility patch
-  against public AtomWorks. See
+  branch `local/atomworks-3.0.4-compat` carries two required patches: AtomWorks
+  API compatibility, and a lowered symmetry `MIN_ATOMS_ALIGN` so 3-4 residue
+  turn-motif ASUs can derive frames. See
   [the symmetric-backbone-generator spike](docs/symmetric_backbone_generator_spike.md).
 - `../RFdiffusion2` remains the asymmetric single-ASU control; it does not
   support symmetry.
@@ -102,6 +103,13 @@ uv run --extra dev pytest
   anchor pair and grows the finite motif around that fixed residue. Treat
   `bp5_motif_offset`/`--turn-bp5-position` as the 1-based residue position of
   BP5 within the 3-residue gamma turn or 4-residue beta turn.
+- Accepted turn-motif states are the starting point for RFdiffusion3 symmetric
+  motif scaffolding; build inputs with `scripts/spike_export_rfd3_input.py`.
+  RFD3 needs nine polypeptide subunit chains, so a bare BP5/Pd site cannot be
+  scaffolded while a 3-4 residue turn motif can.
+- `NanoringCylinderIntrusionScore` only tests the ring's own z-slab. Scaffolded
+  designs can leave the slab clear while capping the tube axis 20-25 Angstrom
+  away, so filter scaffolded output on an axially extended cylinder as well.
 - Turn-motif scans expand complete symmetric states as rotamer state x motif x
   BP5 motif offset. Default turn motifs are `beta_turn_ad`, `beta_turn_ab1`,
   `beta_turn_ab2`, and `gamma_turn_inverse`; additional cis-turn motifs require

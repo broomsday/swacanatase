@@ -24,9 +24,14 @@ all-atom ligand and metal conditioning, and an `is_unsym_motif` flag for a
 single shared on-axis ligand such as the carbon nanoring. It is installed as a
 sibling checkout at `/home/broom/AlphaCarbon/foundry`.
 
-This is verified, not inferred: a C9 assembly of nine 90-residue subunits was
-generated on the workstation GTX 1080 Ti in 388 seconds and is symmetric to
-0.04 Angstrom per-subunit CA RMSD about the Z axis through the origin.
+This is verified on the real theozyme, not inferred. An accepted M18 turn-motif
+state was scaffolded to 64 residues per subunit (576 in the assembly) in 891
+seconds on the workstation GTX 1080 Ti, preserving all nine BP5/Pd sites to
+0.0246-0.0585 Angstrom on the `N/CA/C` frame with the nanoring passed once as a
+shared on-axis ligand. A 810-residue unconditional C9 assembly also ran, in 388
+seconds, symmetric to 0.04 Angstrom per-subunit CA RMSD about Z through the
+origin. The input contract is recorded in `RFDIFFUSION_EXPORT_NOTES.md` and
+implemented by `scripts/spike_export_rfd3_input.py`.
 
 The constraint is now hardware, not method. Nine 180-residue subunits exhaust
 the card, and the production M18 target sits just above the validated size, so

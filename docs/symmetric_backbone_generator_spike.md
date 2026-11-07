@@ -8,12 +8,16 @@ enforces coordinate symmetry and keeps all-atom ligand/metal conditioning, and
 its input contract has a direct expression for a single shared, non-replicated
 ligand on the symmetry axis (the carbon nanoring).
 
-The blocker is no longer the method. A C9 assembly of nine 90-residue subunits
-was generated and verified symmetric on the workstation GTX 1080 Ti (Pascal,
-11 GB) in 388 seconds, but nine 180-residue subunits exhaust the card. The
-production M18 target sits just above the validated size, so production sweeps
-need a current data-center or workstation card even though local single designs
-may be possible.
+This is validated on the real theozyme, not just in principle: an accepted M18
+turn-motif state was scaffolded to 64 residues per subunit with all nine BP5/Pd
+sites preserved to 0.0246-0.0585 Angstrom on the `N/CA/C` frame. See
+[Validated C9 turn-motif scaffolding](#validated-c9-turn-motif-scaffolding-2026-11-07).
+
+The blocker is no longer the method. The workstation GTX 1080 Ti (Pascal, 11 GB)
+ran both that 576-residue scaffolding job (891 seconds) and a 810-residue
+unconditional C9 assembly (388 seconds), but nine 180-residue subunits exhaust
+the card. Production sweeps need a current data-center or workstation card even
+though single designs at the project's current size are possible locally.
 
 Earlier evaluations stand as negative results. RFdiffusion2 does not support
 symmetry in its public inference interface. ProteinGenerator runs successfully
@@ -140,6 +144,13 @@ Two caveats affect the exactness of the symmetry:
   mpnn; all four were patched. Drop the branch once upstream pins a matching
   AtomWorks release. Note that `v0.2.0` has no `checkpoints.py`, so pinning back
   to the last release would also mean finding a different checkpoint.
+- The same branch carries commit `c179d91`, lowering `MIN_ATOMS_ALIGN` in
+  `rfd3/inference/symmetry/checks.py` from 30 to 12. A 4-residue turn-motif ASU
+  is 29 heavy atoms and a 3-residue gamma turn is 25, so both fall below the
+  stock threshold for deriving symmetry frames. The nine subunit copies here are
+  exactly symmetric by construction, so the rigid frame is over-determined well
+  below 30 atoms. On an unpatched checkout only the 7-residue
+  `alpha_helix`/`beta_strand` scan states are large enough.
 
 ### Validated C9 run and symmetry measurement (GTX 1080 Ti)
 
@@ -196,6 +207,43 @@ The production target is roughly nine subunits of about 100 residues plus a
 supported-hardware table; for comparison, RFD4-Proteina documents Ampere through
 Blackwell only.
 
+## Validated C9 turn-motif scaffolding (2026-11-07)
+
+The turn-motif scans already produce exactly what RFD3 symmetric motif
+scaffolding wants. `data/generated/full_clash_0_0_m12_20/` holds 306 accepted
+M18 rows, which are 34 distinct symmetric states, each written as a complete
+nine-site CIF under `scans/turn_motifs/motifs/`. All are clash-free and
+ring-slab-intrusion-free because the scan ran at `clash_cutoff = 0.0`, and the
+M18 theozyme is already C9-symmetric about Z through the origin to 0.0000
+Angstrom, which is precisely RFD3's `is_symmetric_motif` precondition. No
+re-framing was needed.
+
+State scaffolded: `nanoring_M18_gplus_m90_beta_turn_ad_bp5pos2`, chosen because
+`beta_turn_ad` is one of the project's default turn motifs, it is trans rather
+than cis, and both turn termini sit well clear of the ring (N-terminus 8.30,
+C-terminus 4.32 Angstrom beyond the outer carbon radius). Contig `30,A1-4,30`
+gives 64 residues per subunit, 576 in the assembly, and completed in 891
+seconds.
+
+| Quantity | Value |
+| --- | --- |
+| Motif `N/CA/C` frame RMSD, all nine sites | 0.0246-0.0585 Angstrom |
+| BP5 donor `N1`/`N2` deviation | 0.018-0.049 Angstrom |
+| Pd-N distances, input -> output | 2.018 -> 1.983 +/- 0.022 and 2.026 +/- 0.016 Angstrom |
+| Nanoring internal rigidity | 0.0199 Angstrom, plus a 1.61 Angstrom rigid-body centering shift |
+| Per-subunit CA RMSD | 0.032-0.042 Angstrom |
+| Protein atoms in the ring slab | 0 |
+
+The nanoring appeared exactly once in the output, confirming `is_unsym_motif`
+behaves as needed for a shared on-axis ligand. Sequence was co-designed in the
+same pass, so the output carries real residue identities.
+
+The full input contract, the chain-label permutation that any geometry filter
+must handle, and the gap in ring-slab intrusion scoring for scaffolded designs
+are recorded in [RFdiffusion export notes](../RFDIFFUSION_EXPORT_NOTES.md). The
+input builder is `scripts/spike_export_rfd3_input.py`; outputs are preserved
+under `data/generated/rfdiffusion3/c9_turn_motif_spike/`.
+
 ## Consequence
 
 ProteinGenerator can provide sequence-symmetric candidate backbones for
@@ -205,10 +253,10 @@ filters. It cannot by itself meet the required C9 coordinate constraint.
 The production route is RFdiffusion3 symmetry mode with the carbon nanoring
 passed as an `is_unsym_motif` ligand. Remaining work splits cleanly by hardware:
 
-- Local, on this workstation: build and validate the RFD3 input contract for the
-  M18 theozyme (pre-symmetrized motif centered on the origin, non-CCD nanoring
-  naming and bond-graph verification, `select_fixed_atoms` for the BP5 donors
-  and `PD`), using small symmetry groups and short lengths as sanity checks.
+- Local, on this workstation: **done** for the input contract. The remaining
+  local work is extending the intrusion metric along the tube axis, deciding
+  which of the 34 accepted M18 states to carry forward, and promoting
+  `scripts/spike_export_rfd3_input.py` into `src/swacanatase/rfdiffusion.py`.
 - On a rented or shared current-generation GPU: production C9 M18 sweeps,
   followed by the rigid Cn projection and complete geometry validation that
   remain mandatory while `sym_step_frac` leaves the last sampling steps

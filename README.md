@@ -30,9 +30,12 @@ Implemented pieces include:
   [the symmetric-backbone-generator spike](docs/symmetric_backbone_generator_spike.md):
   neither RFdiffusion2 nor the current ProteinGenerator code enforces the
   required rigid C9 coordinates, while RFdiffusion3 does and is the production
-  route, verified by a nine-subunit C9 run that is symmetric to 0.04 Angstrom.
-  RFdiffusion3 runs on this workstation's GTX 1080 Ti up to nine 90-residue
-  subunits, which is just below the production M18 size, so production sweeps
+  route. An accepted M18 turn-motif state has been scaffolded end-to-end with
+  RFdiffusion3 C9 symmetry, preserving all nine BP5/Pd sites to 0.0246-0.0585
+  Angstrom and passing the nanoring once as a shared on-axis ligand; see
+  [the RFdiffusion export notes](RFDIFFUSION_EXPORT_NOTES.md). Inputs are built
+  by `scripts/spike_export_rfd3_input.py`. RFdiffusion3 runs on this
+  workstation's GTX 1080 Ti at the project's current size, but production sweeps
   need a newer card.
 
 ## Setup
